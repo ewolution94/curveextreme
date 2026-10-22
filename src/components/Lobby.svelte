@@ -72,7 +72,7 @@
         {/each}
       </ul>
       <div class="mine">
-        <input class="field-input" maxlength="20" aria-label={t('Your name')} bind:value={name} onchange={() => updateMe({ name: name.trim() })} />
+        <input class="field-input" maxlength="20" aria-label={t('Your name')} placeholder={t('Your name')} bind:value={name} onchange={() => updateMe({ name: name.trim() })} />
         {#if s.type === 'teams'}
           <select class="field-input" aria-label={t('Teams')} value={me?.team ?? 0} onchange={(e) => updateMe({ team: Number((e.target as HTMLSelectElement).value) })}>
             {#each Array.from({ length: s.teams }, (_, i) => i) as i (i)}<option value={i}>{t('Team {n}', { n: i + 1 })}</option>{/each}

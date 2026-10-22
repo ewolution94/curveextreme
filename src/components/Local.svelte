@@ -75,10 +75,12 @@
 
 {#if game && !game.state.over}
   <div class="play">
-    <Scoreboard world={game.world} players={seats.map((s) => ({ ...s, team: 0 }))} me={null} version={game.state.version} />
+    <div class="side">
+      <Scoreboard world={game.world} players={seats.map((s) => ({ ...s, team: 0 }))} me={null} version={game.state.version} />
+      <button class="btn small ghost" type="button" onclick={end}>{t('End game')}</button>
+    </div>
     <Field world={game.world} own={new Set(seats.map((s) => s.id))} predict={prefs.motion === 'predict'} aheadMs={() => 0} behindTicks={0}
       inputFor={(pid) => game!.inputFor(pid)} {colourOf} size={prefs.fieldSize} />
-    <div class="corner"><button class="btn small ghost" type="button" onclick={end}>{t('End game')}</button></div>
   </div>
 {:else if game?.state.over}
   <main class="setup">
@@ -223,9 +225,10 @@
     padding: 16px;
     user-select: none;
   }
-  .corner {
-    position: absolute;
-    top: 10px;
-    right: 12px;
+  .side {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
   }
 </style>

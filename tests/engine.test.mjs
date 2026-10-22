@@ -204,3 +204,28 @@ test('a profile from outside is cleaned: unknown keys dropped, numbers kept in r
   assert.equal(f.evil, undefined);
   assert.equal(f.name, 'Playtest');
 });
+
+test('the Tune panel: a new feel reaches the next round, not the running one', () => {
+  const m = match(2);
+  m.retune({ feel: { ...NOW, speed: 120, name: 'Playtest' } });
+  assert.equal(m.r.feel.speed, 90, 'the running round keeps its feel');
+  const next = m.startRound();
+  assert.equal(next.feel.speed, 120);
+  assert.equal(m.r.feel.name, 'Playtest');
+});
+
+test('walls while moving without a line: off, wrap or solid', () => {
+  const run = (freeWalls) => {
+    const m = match(1, { feel: { ...CLASSIC, freeTime: 4, freeWalls } });
+    const c = m.r.curves[0];
+    c.x = 10; c.a = Math.PI; // heading out of the left wall
+    let died = false;
+    for (let i = 0; i < 260; i++) died ||= !!m.tick(new Map()).e?.some((e) => e.e === 'die');
+    return { died, x: c.x };
+  };
+  assert.equal(run('solid').died, true);
+  assert.ok(run('wrap').x > 0, 'came back in on the other side');
+  const off = run('off');
+  assert.equal(off.died, false);
+  assert.ok(off.x < 0, 'free to leave');
+});

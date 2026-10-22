@@ -51,7 +51,19 @@
 </script>
 
 <div class="play" bind:this={area}>
-  <Scoreboard {world} players={players.map((p) => ({ id: p.id, name: p.name, colour: p.colour, team: p.team }))} me={myId()} version={online.version} />
+  <div class="side">
+    <Scoreboard {world} players={players.map((p) => ({ id: p.id, name: p.name, colour: p.colour, team: p.team }))} me={myId()} version={online.version} />
+    <div class="tools">
+      <span class="code num">{v.code}</span>
+      <button class="btn small ghost" type="button" onclick={() => (settingsOpen = true)}>{t('Settings')}</button>
+      {#if isHost()}
+        <button class="btn small ghost" type="button" onclick={() => (tuneOpen = !tuneOpen)}>{t('Tune')}</button>
+        <button class="btn small ghost" type="button" onclick={stopGame}>{t('End game')}</button>
+      {:else}
+        <button class="btn small ghost" type="button" onclick={leaveRoom}>{t('Leave')}</button>
+      {/if}
+    </div>
+  </div>
   <Field {world} {own} predict={prefs.motion === 'predict'} {aheadMs} behindTicks={prefs.behind} inputFor={() => inputFor()} {colourOf} size={prefs.fieldSize}>
     {#if banner}
       <div class="banner" class:fade={world.phase === 'free'}>
@@ -60,17 +72,6 @@
       </div>
     {/if}
   </Field>
-
-  <div class="corner">
-    <span class="code num">{v.code}</span>
-    <button class="btn small ghost" type="button" onclick={() => (settingsOpen = true)}>{t('Settings')}</button>
-    {#if isHost()}
-      <button class="btn small ghost" type="button" onclick={() => (tuneOpen = !tuneOpen)}>{t('Tune')}</button>
-      <button class="btn small ghost" type="button" onclick={stopGame}>{t('End game')}</button>
-    {:else}
-      <button class="btn small ghost" type="button" onclick={leaveRoom}>{t('Leave')}</button>
-    {/if}
-  </div>
 
   {#if !playing}
     <p class="watching">{t('Watching')} · {t('You join the next game.')}</p>
@@ -132,13 +133,19 @@
   .banner.fade {
     opacity: 0.35;
   }
-  .corner {
-    position: absolute;
-    top: max(10px, env(safe-area-inset-top));
-    right: max(12px, env(safe-area-inset-right));
+  .side {
     display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 0;
+  }
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     align-items: center;
+    max-width: 220px;
   }
   .code {
     font: 800 13px var(--display);
@@ -158,7 +165,7 @@
   .drawer {
     position: absolute;
     right: max(12px, env(safe-area-inset-right));
-    top: 56px;
+    top: 16px;
     bottom: 16px;
     width: min(520px, calc(100vw - 32px));
     overflow: auto;
@@ -196,7 +203,7 @@
       padding-top: max(8px, env(safe-area-inset-top));
       padding-bottom: max(8px, env(safe-area-inset-bottom));
     }
-    .corner .btn {
+    .tools .btn {
       min-height: 28px;
       padding: 0 8px;
       font-size: 12px;

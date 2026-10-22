@@ -1,0 +1,15 @@
+# For trying the image locally (it builds from source). The NAS stack (deploy/portainer-stack.yml)
+# comes with /new-app and the port from the registry.
+services:
+  curveextreme:
+    build: .
+    image: ghcr.io/ewolution94/curveextreme:latest
+    container_name: curveextreme
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - curveextreme-data:/data
+
+volumes:
+  curveextreme-data:
