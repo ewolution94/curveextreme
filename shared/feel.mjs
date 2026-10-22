@@ -18,7 +18,11 @@ export const CLASSIC = Object.freeze({
   gapMin: 0, // shortest line between two gaps
   gapLength: 16, // a gap's length
   stillTime: 2.5, // seconds the curves sit still, with a heading arrow
-  freeTime: 2.5, // seconds they move without a line (no walls, no collisions)
+  freeTime: 2.5, // seconds they move without a line (no collisions)
+  // the walls while they move without a line: 'off' as measured (the dot left the field and drove
+  // back in; still outside when the lines start is a crash), 'wrap' (through to the other side) or
+  // 'solid' (a crash, like later). What the reference does with a dot still outside is unknown.
+  freeWalls: 'off',
   lingerTime: 4.65, // seconds a decided round runs on before it clears
   fieldBase: 255, // a "Scaled" square field is fieldBase × √players units a side
   fieldWide: 1, // the field's width and height relative to that square
@@ -45,6 +49,11 @@ export const GSPP = Object.freeze({
 
 export const BUILT_IN = Object.freeze({ classic: CLASSIC, gspp: GSPP });
 
+/** The Tune panel's choices (settings that aren't numbers). */
+export const CHOICES = Object.freeze([
+  { key: 'freeWalls', label: 'Walls while moving without a line', options: ['off', 'wrap', 'solid'] },
+]);
+
 /** The Tune panel's dials: one per number, with the range a playtest might want. */
 export const DIALS = Object.freeze([
   { key: 'speed', label: 'Speed', unit: 'u/s', min: 30, max: 400, step: 1 },
@@ -68,8 +77,11 @@ export function cleanFeel(input, base = CLASSIC) {
   const out = { ...base };
   if (!input || typeof input !== 'object') return out;
   if (typeof input.name === 'string') out.name = input.name.slice(0, 40);
+  for (const choice of CHOICES) {
+    if (choice.options.includes(input[choice.key])) out[choice.key] = input[choice.key];
+  }
   for (const key of Object.keys(CLASSIC)) {
-    if (key === 'name') continue;
+    if (key === 'name' || CHOICES.some((c) => c.key === key)) continue;
     const v = Number(input[key]);
     if (!Number.isFinite(v)) continue;
     const dial = DIALS.find((d) => d.key === key);

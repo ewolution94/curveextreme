@@ -174,6 +174,7 @@ export function createRooms({ profiles }) {
       if (m.conn && m.conn !== conn) m.conn.ws.close(4000); // the same player in a newer tab
       m.conn = conn;
       m.name = conn.name;
+      m.input = { dir: 0, presses: [], seq: 0 }; // a new page numbers its inputs from 1 again
       conn.room = this;
       this.emptySince = 0;
       if (!this.host || !this.members.get(this.host)?.conn) this.host = m.id;

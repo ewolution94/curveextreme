@@ -281,6 +281,14 @@ export class Match {
         let jump = c.jump;
         c.jump = false;
         if (r.phase === 'free') {
+          const walls = feel.freeWalls ?? 'off';
+          if (walls === 'wrap' && wrapInto(c, rect)) jump = true;
+          if (walls === 'solid' && (c.x < rect.x0 || c.y < rect.y0 || c.x > rect.x1 || c.y > rect.y1)) {
+            c.alive = false;
+            tuples.push([c.id, r2(c.x), r2(c.y), r4(c.a), 4, r2(m.w)]);
+            ev.push({ e: 'die', cid: c.id, pid: c.pid, x: r2(c.x), y: r2(c.y), by: null });
+            continue;
+          }
           tuples.push([c.id, r2(c.x), r2(c.y), r4(c.a), jump ? 2 : 0, r2(m.w)]);
           continue;
         }
