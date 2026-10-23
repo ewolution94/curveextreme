@@ -1,13 +1,12 @@
-// This device's settings: how the field and your curve are shown (the steering pick's switches, so a
-// playtest can flip them), sound, the shared keyboard's keys. Kept in localStorage. The language is
-// the family's own key (src/lib/i18n.svelte.ts).
+// This device's settings: the field's size, sound, the shared keyboard's keys. Kept in localStorage.
+// The language is the family's own key (src/lib/i18n.svelte.ts). How your curve and the others are
+// shown isn't a setting since 2026-10-23: the page simulates the round itself (src/lib/runner.ts).
 
 import { load, save } from './store';
-import { DEFAULT_SEAT_KEYS, type BothKeys } from './input';
+import { DEFAULT_SEAT_KEYS } from './input';
 import { setSound } from './sound';
 
 export type FieldSize = 'auto' | 'reference' | 'fill';
-export type Motion = 'predict' | 'server';
 
 // v2 (2026-10-23): the field fills the screen by default (the user's call); a device that saved the
 // old default, auto, moves to fill once. Like the original stays one setting away.
@@ -22,11 +21,6 @@ export const prefs = $state(
     /** fill: all the room there is; reference: the reference's scale (window height ÷ 922 px per unit);
      *  auto: the reference's scale on a computer, the whole screen on a phone */
     fieldSize: 'fill' as FieldSize,
-    /** predict: your curve drawn ahead with the keys you hold (instant); server: a tick behind */
-    motion: 'predict' as Motion,
-    /** others are drawn this many ticks in the past, so their motion stays smooth */
-    behind: 2,
-    both: 'last' as BothKeys,
     seatKeys: DEFAULT_SEAT_KEYS.map((p) => [...p]) as [string, string][],
   }),
 );

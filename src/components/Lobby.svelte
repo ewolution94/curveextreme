@@ -5,7 +5,7 @@
   computer two columns: the room and its people left, the game right.
 -->
 <script lang="ts">
-  import { online, myId, isHost, updateMe, settings, startGame, saveProfile, type Member } from '../lib/online.svelte';
+  import { online, myId, isHost, updateMe, settings, startGame, saveProfile, kick, type Member } from '../lib/online.svelte';
   import { progress } from '../lib/progress';
   import { MODES, MODE_KEYS } from '../../shared/modes.mjs';
   import { POWERUPS, POWERUP_KINDS } from '../../shared/powerups.mjs';
@@ -39,6 +39,12 @@
   let error = $state('');
   let youOpen = $state(false);
   let youShown = $state(false);
+  /** The host's sheet for someone else: take them out of the room. */
+  let other: Member | null = $state(null);
+  let otherShown: Member | null = $state(null);
+  $effect(() => {
+    if (other) otherShown = other;
+  });
   let name = $state('');
   $effect(() => {
     if (youOpen) youShown = true;
@@ -78,13 +84,14 @@
 
 {#snippet playerRow(m: Member)}
   {@const mine = m.id === myId()}
+  {@const tappable = mine || host}
   <svelte:element
-    this={mine ? 'button' : 'div'}
+    this={tappable ? 'button' : 'div'}
     class="player"
     class:me={mine}
-    type={mine ? 'button' : undefined}
-    onclick={mine ? openYou : undefined}
-    role={mine ? undefined : 'listitem'}
+    type={tappable ? 'button' : undefined}
+    onclick={tappable ? () => (mine ? openYou() : (other = m)) : undefined}
+    role={tappable ? undefined : 'listitem'}
   >
     <Avatar avatar={m.avatar} size={32} />
     <i class="swatch" style:background={m.colour}></i>
@@ -117,7 +124,7 @@
       <div class="chairs" role="list">
         {#each seated as m (m.id)}{@render playerRow(m)}{/each}
       </div>
-      <p class="hint">{t('Tap yourself to change your seal, colour or team.')}</p>
+      <p class="hint">{host ? t('Tap yourself to change your seal, colour or team, someone else to take them out of the room.') : t('Tap yourself to change your seal, colour or team.')}</p>
       {#if watching.length}
         <span class="label">{t('Watching')}</span>
         <div class="chairs" role="list">
@@ -252,6 +259,26 @@
         </div>
       {/if}
       <button class="btn primary block" type="button" onclick={() => (youOpen = false)}>{t('Done')}</button>
+    </div>
+  {/if}
+</ewo-sheet>
+
+<ewo-sheet open={Boolean(other)} label={otherShown?.name ?? ''} oncancel={() => (other = null)} onclose={() => ((otherShown = null), (other = null))}>
+  <span slot="heading">{otherShown?.name ?? ''}</span>
+  {#if otherShown}
+    <div class="menu">
+      <p class="sure">{t('Take {name} out of the room? They can’t come back into it.', { name: otherShown.name })}</p>
+      <div class="pair">
+        <button
+          class="btn danger-fill"
+          type="button"
+          onclick={() => {
+            if (other) kick(other.id);
+            other = null;
+          }}>{t('Take them out')}</button
+        >
+        <button class="btn" type="button" onclick={() => (other = null)}>{t('Back')}</button>
+      </div>
     </div>
   {/if}
 </ewo-sheet>

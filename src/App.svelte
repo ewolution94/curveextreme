@@ -4,7 +4,7 @@
   // the link people share: a room this device was in lately is taken again at once, any other asks
   // who you are first (Join). The shared keyboard lives in the page.
   import { onMount } from 'svelte';
-  import { online, start, joinRoom, leaveRoom } from './lib/online.svelte';
+  import { online, joinRoom, leaveRoom } from './lib/online.svelte';
   import { knowsRoom } from './lib/store';
   import { unlockAudio } from './lib/sound';
   import { loadCensus } from './lib/census';
@@ -60,6 +60,12 @@
     }
   }
 
+  // Out of a room for good (kicked, the room gone, opened in a newer tab): back to the start, which
+  // says why.
+  $effect(() => {
+    if (!online.view && code && ['kicked', 'no-room', 'elsewhere'].includes(online.error)) go('/', true);
+  });
+
   // The room's own link stays in the address bar (online.svelte.ts writes it); the path follows.
   $effect(() => {
     const c = online.view?.code;
@@ -67,7 +73,6 @@
   });
 
   onMount(() => {
-    start();
     if (!code && path !== '/') go('/', true);
     if (code && knowsRoom(code)) void reclaim(code);
     const onPop = () => {

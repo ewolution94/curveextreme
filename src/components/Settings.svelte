@@ -3,18 +3,15 @@
   ewo-sheet, opened from the band's or the arena's ewo-settings-button. During a game (`game` given)
   it opens with "This game" first: the host can end it for everyone, anyone can leave, each after a
   second tap that says what it does (development/plans/end-game.md); at the shared keyboard the game
-  can be ended. Then General: the language and the sounds. Then how the game is drawn on this device:
-  the steering pick's switches (field size, your curve, the others, both keys held), so a playtest can
-  flip them and the next frame shows the difference. CurveExtreme is dark only, so there's no theme.
+  can be ended. Then General: the language and the sounds. Then the field's size on this device.
+  CurveExtreme is dark only, so there's no theme.
 -->
 <script lang="ts">
   import GuideRow from './GuideRow.svelte';
   import { themeShift } from '../../vendor/ewo/elements/theme-shift.js';
   import { i18n, setLanguage, systemLang, t, type LangChoice } from '../lib/i18n.svelte';
-  import { prefs, savePrefs, type FieldSize, type Motion } from '../lib/prefs.svelte';
-  import { steering } from '../lib/online.svelte';
+  import { prefs, savePrefs, type FieldSize } from '../lib/prefs.svelte';
   import { sfx, unlockAudio } from '../lib/sound';
-  import type { BothKeys } from '../lib/input';
   import { waitAt } from '../lib/waits';
 
   type Game = {
@@ -72,9 +69,8 @@
     else themeShift(() => setLanguage(next));
   }
 
-  function set<K extends 'fieldSize' | 'motion' | 'behind' | 'both' | 'sound'>(key: K, value: (typeof prefs)[K]) {
+  function set<K extends 'fieldSize' | 'sound'>(key: K, value: (typeof prefs)[K]) {
     prefs[key] = value;
-    if (key === 'both') steering.both = value as BothKeys;
     savePrefs();
   }
 </script>
@@ -151,26 +147,6 @@
           <option value="fill">{t('Fill')}</option>
           <option value="reference">{t('Original')}</option>
           <option value="auto">{t('Auto')}</option>
-        </ewo-segmented>
-      </div>
-      <div class="row">
-        <span class="name">{t('Your curve')}<small>{t('Instant: drawn ahead with the keys you hold, as if there were no delay.')}</small></span>
-        <ewo-segmented stretch value={prefs.motion} label={t('Your curve')} onchange={(e) => set('motion', e.detail.value as Motion)}>
-          <option value="predict">{t('Instant')}</option>
-          <option value="server">{t('Server')}</option>
-        </ewo-segmented>
-      </div>
-      <div class="row">
-        <span class="name">{t('The others')}<small>{t('Drawn a few ticks behind, so they move smoothly.')}</small></span>
-        <ewo-segmented stretch value={String(prefs.behind)} label={t('The others')} onchange={(e) => set('behind', Number(e.detail.value))}>
-          {#each [0, 1, 2, 3] as n (n)}<option value={String(n)}>{n}</option>{/each}
-        </ewo-segmented>
-      </div>
-      <div class="row">
-        <span class="name">{t('Both keys held')}</span>
-        <ewo-segmented stretch value={prefs.both} label={t('Both keys held')} onchange={(e) => set('both', e.detail.value as BothKeys)}>
-          <option value="last">{t('Last wins')}</option>
-          <option value="straight">{t('Straight')}</option>
         </ewo-segmented>
       </div>
     </section>

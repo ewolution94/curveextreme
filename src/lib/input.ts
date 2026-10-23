@@ -1,19 +1,15 @@
 // Steering: two keys (or the two halves of a touch screen) become a direction (-1 left, 0, 1 right)
-// and, for Corner, single presses. One Steering per player: the room's one, or each seat of the
-// shared keyboard.
-
-export type BothKeys = 'last' | 'straight';
+// and, for Corner, single presses. Both held: the one pressed last. One Steering per player: the
+// room's one, or each seat of the shared keyboard. It calls back on every press and release; the
+// caller sends only what changes (src/lib/online.svelte.ts).
 
 export class Steering {
   private held: number[] = []; // sides held, oldest first
-  constructor(
-    private onChange: (dir: number, press: number) => void,
-    public both: BothKeys = 'last',
-  ) {}
+  constructor(private onChange: (dir: number, press: number) => void) {}
 
   dir() {
     const L = this.held.includes(-1), R = this.held.includes(1);
-    if (L && R) return this.both === 'straight' ? 0 : this.held[this.held.length - 1];
+    if (L && R) return this.held[this.held.length - 1];
     return L ? -1 : R ? 1 : 0;
   }
 

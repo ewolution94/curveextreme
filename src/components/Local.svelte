@@ -83,15 +83,21 @@
   }
   onDestroy(end);
 
-  const colourOf = (pid: string) => seats.find((s) => s.id === pid)?.colour ?? '#888';
   const seatOf = (pid: string | null) => seats.find((s) => s.id === pid);
+  const runner = $derived.by(() => {
+    void game?.state.version;
+    return game?.runner ?? null;
+  });
   const localBanner = $derived.by(() => {
     if (!game) return null;
     void game.state.version;
-    const w = game.world;
-    if (w.phase === 'still' || w.phase === 'free') return { big: t('Round {n}', { n: w.no }), small: t('Get ready') };
-    if (w.phase === 'linger' || w.phase === 'done') {
-      const name = seatOf(w.winner)?.name;
+    const r = game.runner;
+    if (!r) return null;
+    const phase = r.round.phase;
+    if (phase === 'still' || phase === 'free') return { big: t('Round {n}', { n: r.no }), small: t('Get ready') };
+    if (phase === 'linger' || phase === 'done') {
+      const w = r.round.s.winner;
+      const name = w === null ? undefined : seats[w]?.name;
       return { big: name ? t('{name} takes the round', { name }) : t('Nobody takes the round'), small: '' };
     }
     return null;
@@ -105,9 +111,8 @@
 
 <svelte:window onkeydown={bindNext} />
 
-{#if game && !game.state.over}
-  <Arena world={game.world} version={game.state.version} players={seats.map((s) => ({ ...s, team: 0 }))} me={null}
-    own={new Set(seats.map((s) => s.id))} aheadMs={() => 0} behindTicks={0} inputFor={(pid) => game!.inputFor(pid)} {colourOf}
+{#if game && !game.state.over && runner}
+  <Arena {runner} version={game.state.version} players={seats.map((s) => ({ ...s, team: 0 }))} me={null}
     keys={seats.map((s) => `${s.name} ${keyLabel(s.keys[0])} ${keyLabel(s.keys[1])}`).join(' · ')} banner={localBanner}>
     {#snippet actions()}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

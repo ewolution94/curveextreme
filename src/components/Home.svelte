@@ -8,7 +8,7 @@
   import { firstVisit } from '../../vendor/ewo/elements/guide.js';
   import type { Avatar } from '../lib/avatar';
   import { t } from '../lib/i18n.svelte';
-  import { createRoom, updateMe } from '../lib/online.svelte';
+  import { createRoom, online, updateMe } from '../lib/online.svelte';
   import { levelOf, progress } from '../lib/progress';
   import { identity } from '../lib/store';
   import { ui } from '../lib/ui.svelte';
@@ -31,7 +31,13 @@
   let avatar: Avatar = $state(me.avatar);
   let colour = $state(me.colour || '#ffe53b');
   let code = $state('');
-  let error = $state('');
+  // why the last room ended, if it ended on its own
+  const ENDED: Record<string, string> = {
+    kicked: 'The host took you out of the room.',
+    'no-room': 'That room is gone.',
+    elsewhere: 'The room is open in another tab.',
+  };
+  let error = $state(ENDED[online.error] ? t(ENDED[online.error]) : '');
   let statsOpen = $state(false);
   const prog = progress();
   const lv = levelOf(prog.xp);

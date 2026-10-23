@@ -1,12 +1,14 @@
-// Draws the field on three canvases: the trail (lines, drawn once when the shown time passes them),
-// the top layer (heads, live line ends, powerups, zones, walls, arrows, bursts, effect rings,
-// redrawn every frame) and the fog (darkness). The look comes from a Theme, so a new look is a new
-// theme object, not new drawing code.
+// Draws a round as this page simulates it (runner.ts) on three canvases: the trail (the lines, each
+// piece drawn once when it's old enough that no late action can change it), the top layer (the
+// newest pieces, the heads between frames, powerups, zones, walls, arrows, bursts, effect rings,
+// redrawn every frame) and the fog (darkness). A rewind deeper than the trail's settled part draws
+// the trail again from the round's lines. The look comes from a Theme, so a new look is a new theme
+// object, not new drawing code.
 
 import { POWERUPS, ACTIONS } from '../../shared/powerups.mjs';
+import { wallsAt, wrapInto } from '../../shared/engine.mjs';
 import { drawPowerup } from './icons';
-import { predictPath, type Pending } from './predict';
-import type { Curve, Seg, World } from './world';
+import type { RoundRunner } from './runner';
 
 export type Theme = {
   field: string; // the field's ground
@@ -28,18 +30,17 @@ export const CLASSIC_THEME: Theme = {
   veil: 'rgba(0, 0, 0, 0.72)',
 };
 
-/** How this page shows a round: which curves are its own, how far ahead and behind. */
+/** Frames a line piece waits on the top layer before it goes on the trail for good. */
+const SETTLE = 12;
+
 export type ShowOptions = {
   now: number;
-  own: Set<string>; // the player ids this page steers
-  predict: boolean; // own curves drawn ahead (instant) or a tick behind
-  aheadMs: number; // instant: how far ahead (the round trip online, 0 on the shared keyboard)
-  behindTicks: number; // others are shown this many ticks in the past
-  inputFor: (pid: string) => { dir0: number; pending: Pending[] }; // own curves' inputs
-  colourOf: (pid: string) => string;
+  /** The frame shown, fractional (the runner's clock). */
+  T: number;
+  colourOf: (player: number) => string;
 };
 
-type Shown = { c: Curve; x: number; y: number; a: number; tail: number[] | null; own: boolean };
+type Head = { c: any; x: number; y: number; a: number; own: boolean };
 
 export class Renderer {
   trail: CanvasRenderingContext2D;
@@ -49,8 +50,13 @@ export class Renderer {
   scale = 1;
   dpr = 1;
   bursts: { x: number; y: number; colour: string; born: number; w: number }[] = [];
-  private committed = new Map<number, Seg>(); // each curve's last committed piece, for round joins
   private fogOn = false;
+  /** What's on the trail canvas: whose lines (round and trail object), how many points, up to which frame. */
+  private drawnRunner: RoundRunner | null = null;
+  private drawnTrail: any = null;
+  private drawnLen = 0;
+  private drawnFrame = -1;
+  private lastOf = new Map<number, number>(); // each curve's last point on the trail canvas
 
   constructor(trail: HTMLCanvasElement, top: HTMLCanvasElement, fog: HTMLCanvasElement) {
     this.trail = trail.getContext('2d')!;
@@ -59,7 +65,7 @@ export class Renderer {
   }
 
   /** The canvases' size in CSS pixels for a field of W × H units. */
-  resize(world: World, cssW: number, cssH: number, colourOf: (pid: string) => string) {
+  resize(W: number, cssW: number, cssH: number) {
     this.dpr = Math.min(3, window.devicePixelRatio || 1);
     for (const g of [this.trail, this.top, this.fog]) {
       g.canvas.style.width = `${cssW}px`;
@@ -67,88 +73,96 @@ export class Renderer {
       g.canvas.width = Math.max(1, Math.round(cssW * this.dpr));
       g.canvas.height = Math.max(1, Math.round(cssH * this.dpr));
     }
-    this.scale = this.trail.canvas.width / world.W;
-    this.redrawAll(world, colourOf);
+    this.scale = this.trail.canvas.width / W;
+    this.drawnTrail = null; // drawn again at the new size
   }
 
-  redrawAll(world: World, colourOf: (pid: string) => string) {
-    const g = this.trail;
-    g.clearRect(0, 0, g.canvas.width, g.canvas.height);
-    this.committed.clear();
-    for (const c of world.curves.values()) {
-      let prev: Seg | null = null;
-      for (const s of c.segs) {
-        this.piece(g, s, prev && prev.k === s.k - 1 ? prev : null, colourOf(c.pid));
-        prev = s;
-      }
-      if (prev) this.committed.set(c.cid, prev);
-    }
-    world.redraw = false;
-  }
-
-  /** A line piece: square ends (the reference's), a round join to the piece before it. */
-  private piece(g: CanvasRenderingContext2D, s: { x1: number; y1: number; x2: number; y2: number; w: number }, prev: Seg | null, colour: string, x2 = s.x2, y2 = s.y2) {
+  /** Piece i of a trail: square ends (the reference's), a round join to the piece before it. */
+  private piece(g: CanvasRenderingContext2D, t: any, i: number, prev: number | undefined, colour: string) {
     const k = this.scale;
     g.strokeStyle = colour;
-    g.lineWidth = s.w * k;
+    g.lineWidth = t.r[i] * 2 * k;
     g.lineCap = 'butt';
     g.lineJoin = 'round';
     g.beginPath();
-    if (prev) {
-      g.moveTo(prev.x1 * k, prev.y1 * k);
-      g.lineTo(s.x1 * k, s.y1 * k);
-    } else g.moveTo(s.x1 * k, s.y1 * k);
-    g.lineTo(x2 * k, y2 * k);
+    const joined = prev !== undefined && t.f[prev] === t.f[i] - 1 && t.x[prev] === t.px[i] && t.y[prev] === t.py[i];
+    if (joined) {
+      g.moveTo(t.px[prev] * k, t.py[prev] * k);
+      g.lineTo(t.px[i] * k, t.py[i] * k);
+    } else g.moveTo(t.px[i] * k, t.py[i] * k);
+    g.lineTo(t.x[i] * k, t.y[i] * k);
     g.stroke();
   }
 
-  private commit(c: Curve, upTo: number, colour: string) {
-    while (c.pending.length && c.pending[0].k <= upTo) {
-      const s = c.pending.shift()!;
-      const prev = this.committed.get(c.cid);
-      this.piece(this.trail, s, prev && prev.k === s.k - 1 ? prev : null, colour);
-      this.committed.set(c.cid, s);
-      c.segs.push(s);
+  /** The trail canvas brought up to `upTo` (points from older frames), from scratch if it must. */
+  private settle(runner: RoundRunner, upTo: number, colourOf: (p: number) => string) {
+    const t = runner.round.trail;
+    const rewound = runner.takeRewound();
+    if (runner !== this.drawnRunner || t !== this.drawnTrail || rewound <= this.drawnFrame || t.x.length < this.drawnLen) {
+      const g = this.trail;
+      g.clearRect(0, 0, g.canvas.width, g.canvas.height);
+      this.drawnRunner = runner;
+      this.drawnTrail = t;
+      this.drawnLen = 0;
+      this.drawnFrame = -1;
+      this.lastOf.clear();
     }
+    let i = this.drawnLen;
+    while (i < t.x.length && t.f[i] <= upTo) {
+      this.piece(this.trail, t, i, this.lastOf.get(t.cid[i]), colourOf(t.p[i]));
+      this.lastOf.set(t.cid[i], i);
+      i++;
+    }
+    this.drawnLen = i;
+    this.drawnFrame = Math.max(this.drawnFrame, upTo);
   }
 
   /** One frame. */
-  frame(world: World, o: ShowOptions) {
-    if (world.redraw) this.redrawAll(world, o.colourOf);
+  frame(runner: RoundRunner, o: ShowOptions) {
+    const round = runner.round;
+    const s = round.s;
     const k = this.scale;
     const g = this.top;
+    const T = Math.max(0, o.T);
+    const frac = Math.min(1, Math.max(0, T - s.k));
+    this.settle(runner, s.k - SETTLE, o.colourOf);
     g.clearRect(0, 0, g.canvas.width, g.canvas.height);
-    const live = world.liveTick(o.now);
-    const behind = live - o.behindTicks;
-    const rect = world.rectAt(behind);
+    const rect = wallsAt(s.walls, T);
 
-    // the curves where this page shows them
-    const shown: Shown[] = [];
-    for (const c of world.curves.values()) {
-      const colour = o.colourOf(c.pid);
-      const own = o.own.has(c.pid);
-      if (own && o.predict) {
-        this.commit(c, world.k, colour);
-        const inp = o.inputFor(c.pid);
-        const ahead = (o.now - world.arrival + o.aheadMs) / world.dtMs;
-        const { pts, head } = predictPath(world, c, ahead, inp.dir0, inp.pending);
-        const last = c.hist[c.hist.length - 1];
-        const drawing = c.alive && world.phase !== 'still' && world.k > world.free && (last.bits & 1) !== 0 && !c.m.fly;
-        shown.push({ c, x: head.x, y: head.y, a: head.a, tail: drawing ? pts : null, own });
-      } else {
-        const t = own ? live - 1 : behind;
-        const base = Math.floor(t);
-        this.commit(c, base, colour);
-        const p = world.at(c, t);
-        const next = c.pending[0];
-        const tail = next && next.k === base + 1 && !p.jumpAfter ? [next.x1, next.y1, p.x, p.y] : null;
-        shown.push({ c, x: p.x, y: p.y, a: p.a, tail, own });
+    // the newest pieces, not on the trail yet
+    const t = s.trail;
+    const last = new Map(this.lastOf);
+    for (let i = this.drawnLen; i < t.x.length; i++) {
+      this.piece(g, t, i, last.get(t.cid[i]), o.colourOf(t.p[i]));
+      last.set(t.cid[i], i);
+    }
+
+    // the heads, between frames: the next frame's arcs, with this frame's actions known so far
+    const acts = runner.actionsAt(s.k);
+    const heads: Head[] = [];
+    for (const c of s.curves) {
+      const h = round.headAt(c, frac, acts);
+      const m = round.motion(c);
+      if (m.wrap) wrapInto(h, rect);
+      heads.push({ c, x: h.x, y: h.y, a: h.a, own: runner.own.has(c.p) });
+      // the live line end, from the last point to the head
+      const drawing = c.alive && (s.phase === 'draw' || s.phase === 'linger') && c.gapLeft <= 0 && !m.fly && Math.abs(h.x - c.x) + Math.abs(h.y - c.y) < 40;
+      const end = last.get(c.id);
+      if (drawing && end !== undefined && t.f[end] === s.k - 1) {
+        g.strokeStyle = o.colourOf(c.p);
+        g.lineWidth = m.w * k;
+        g.lineCap = 'butt';
+        g.lineJoin = 'round';
+        g.beginPath();
+        g.moveTo(t.px[end] * k, t.py[end] * k);
+        g.lineTo(c.x * k, c.y * k);
+        g.lineTo(h.x * k, h.y * k);
+        g.stroke();
       }
     }
 
     // safe zones
-    for (const z of world.zones) {
-      if (z.until <= behind) continue;
+    for (const z of s.zones) {
       g.fillStyle = this.theme.zoneFill;
       g.strokeStyle = this.theme.zoneEdge;
       g.lineWidth = 1.5 * this.dpr;
@@ -159,59 +173,45 @@ export class Renderer {
     }
 
     // powerups
-    const pr = (world.feel?.powerupRadius ?? 22) * k;
-    for (const p of world.powerups.values()) drawPowerup(g, p.kind, p.x * k, p.y * k, pr);
+    const pr = round.feel.powerupRadius * k;
+    for (const p of s.powerups) drawPowerup(g, p.kind, p.x * k, p.y * k, pr);
 
-    // live line ends and heads
-    for (const s of shown) {
-      const colour = o.colourOf(s.c.pid);
-      if (s.tail && s.c.alive) {
-        const w = s.c.m.w;
-        g.strokeStyle = colour;
-        g.lineWidth = w * k;
-        g.lineCap = 'butt';
-        g.lineJoin = 'round';
-        g.beginPath();
-        let moved = false;
-        for (let i = 0; i + 1 < s.tail.length; i += 2) {
-          const x = s.tail[i], y = s.tail[i + 1];
-          if (Number.isNaN(x)) { moved = false; continue; }
-          if (!moved) { g.moveTo(x * k, y * k); moved = true; } else g.lineTo(x * k, y * k);
-        }
-        g.stroke();
-      }
-      if (!s.c.alive) continue;
-      g.fillStyle = colour;
+    // heads
+    for (const h of heads) {
+      if (!h.c.alive) continue;
+      const m = round.motion(h.c);
+      g.fillStyle = o.colourOf(h.c.p);
       g.beginPath();
-      g.arc(s.x * k, s.y * k, Math.max((s.c.m.w / 2) * k, 1.5 * this.dpr), 0, Math.PI * 2);
+      g.arc(h.x * k, h.y * k, Math.max((m.w / 2) * k, 1.5 * this.dpr), 0, Math.PI * 2);
       g.fill();
     }
 
     // the heading arrows while the curves sit still, and a ring around your own
-    if (live <= world.still) {
-      for (const s of shown) {
-        if (!s.c.alive) continue;
-        const colour = this.theme.arrow ?? o.colourOf(s.c.pid);
-        const L = 32, hx = s.x + Math.cos(s.a) * L, hy = s.y + Math.sin(s.a) * L;
+    if (T <= round.stillK) {
+      for (const h of heads) {
+        if (!h.c.alive) continue;
+        const m = round.motion(h.c);
+        const colour = this.theme.arrow ?? o.colourOf(h.c.p);
+        const L = 32, hx = h.x + Math.cos(h.a) * L, hy = h.y + Math.sin(h.a) * L;
         g.strokeStyle = colour;
-        g.lineWidth = Math.max(1.5 * this.dpr, s.c.m.w * 0.3 * k);
+        g.lineWidth = Math.max(1.5 * this.dpr, m.w * 0.3 * k);
         g.lineCap = 'round';
         g.beginPath();
-        g.moveTo((s.x + Math.cos(s.a) * s.c.m.w * 0.6) * k, (s.y + Math.sin(s.a) * s.c.m.w * 0.6) * k);
+        g.moveTo((h.x + Math.cos(h.a) * m.w * 0.6) * k, (h.y + Math.sin(h.a) * m.w * 0.6) * k);
         g.lineTo(hx * k, hy * k);
         for (const side of [-1, 1]) {
-          const a = s.a + Math.PI + side * 0.5;
+          const a = h.a + Math.PI + side * 0.5;
           g.moveTo(hx * k, hy * k);
           g.lineTo((hx + Math.cos(a) * 8) * k, (hy + Math.sin(a) * 8) * k);
         }
         g.stroke();
-        if (s.own) {
+        if (h.own) {
           const pulse = 0.5 + 0.5 * Math.sin(o.now / 180);
           g.strokeStyle = this.theme.ring;
           g.globalAlpha = 0.35 + 0.5 * pulse;
           g.lineWidth = 1.5 * this.dpr;
           g.beginPath();
-          g.arc(s.x * k, s.y * k, (s.c.m.w / 2 + 9 + pulse * 3) * k, 0, Math.PI * 2);
+          g.arc(h.x * k, h.y * k, (m.w / 2 + 9 + pulse * 3) * k, 0, Math.PI * 2);
           g.stroke();
           g.globalAlpha = 1;
         }
@@ -219,27 +219,28 @@ export class Renderer {
     }
 
     // effect rings: the longest-running effect's time left, on your own curves
-    for (const s of shown) {
-      if (!s.own || !s.c.alive || !s.c.m.fx?.length) continue;
+    for (const h of heads) {
+      if (!h.own || !h.c.alive || !h.c.effects.length) continue;
       let left = 0;
-      for (const [kind, until] of s.c.m.fx) {
-        const dur = (POWERUPS as any)[kind]?.dur ?? 1;
-        left = Math.max(left, (until - live) / (dur * world.rate));
+      for (const e of h.c.effects) {
+        const dur = (POWERUPS as any)[e.kind]?.dur ?? 1;
+        left = Math.max(left, (e.until - T) / (dur * round.rate));
       }
       if (left <= 0) continue;
+      const m = round.motion(h.c);
       g.strokeStyle = this.theme.ring;
       g.lineWidth = 1.5 * this.dpr;
       g.beginPath();
-      g.arc(s.x * k, s.y * k, (s.c.m.w / 2 + 6) * k, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, left));
+      g.arc(h.x * k, h.y * k, (m.w / 2 + 6) * k, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, left));
       g.stroke();
     }
 
     // crashes: translucent circles in the curve's colour, out about 30 units, gone after 2 s
     this.bursts = this.bursts.filter((b) => o.now - b.born < 2000);
     for (const b of this.bursts) {
-      const t = (o.now - b.born) / 2000;
-      const e = 1 - (1 - t) * (1 - t);
-      g.globalAlpha = 0.45 * (1 - t);
+      const tb = (o.now - b.born) / 2000;
+      const e = 1 - (1 - tb) * (1 - tb);
+      g.globalAlpha = 0.45 * (1 - tb);
       g.fillStyle = b.colour;
       for (let i = 0; i < 12; i++) {
         const a = (i / 12) * Math.PI * 2 + (b.born % 1);
@@ -252,9 +253,9 @@ export class Renderer {
     }
 
     // closing walls: dark outside, a line where they are
-    if (world.walls.closing) {
+    if (s.walls.closing) {
       g.fillStyle = this.theme.veil;
-      const W = world.W * k, H = world.H * k;
+      const W = round.W * k, H = round.H * k;
       g.beginPath();
       g.rect(0, 0, W, H);
       g.rect(rect.x0 * k, rect.y0 * k, (rect.x1 - rect.x0) * k, (rect.y1 - rect.y0) * k);
@@ -265,23 +266,22 @@ export class Renderer {
     }
 
     // darkness: black but for a light around each head
-    const dark = behind < world.darkUntil;
     const f = this.fog;
-    if (dark) {
+    if (T < s.darkUntil) {
       f.globalCompositeOperation = 'source-over';
       f.clearRect(0, 0, f.canvas.width, f.canvas.height);
       f.fillStyle = '#000';
       f.fillRect(0, 0, f.canvas.width, f.canvas.height);
       f.globalCompositeOperation = 'destination-out';
       const R = ACTIONS.darkness.radius * k;
-      for (const s of shown) {
-        if (!s.c.alive) continue;
-        const grad = f.createRadialGradient(s.x * k, s.y * k, R * 0.55, s.x * k, s.y * k, R);
+      for (const h of heads) {
+        if (!h.c.alive) continue;
+        const grad = f.createRadialGradient(h.x * k, h.y * k, R * 0.55, h.x * k, h.y * k, R);
         grad.addColorStop(0, 'rgba(0,0,0,1)');
         grad.addColorStop(1, 'rgba(0,0,0,0)');
         f.fillStyle = grad;
         f.beginPath();
-        f.arc(s.x * k, s.y * k, R, 0, Math.PI * 2);
+        f.arc(h.x * k, h.y * k, R, 0, Math.PI * 2);
         f.fill();
       }
       f.globalCompositeOperation = 'source-over';

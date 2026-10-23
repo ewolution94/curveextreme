@@ -1,21 +1,16 @@
 <script lang="ts">
-  // The field: three canvases (trail, top, fog) at the size the settings ask for, drawn every frame
-  // from the world. "Like the original" draws one unit as window height ÷ 922 px, whatever the field
-  // (a duel is a smallish square, as in the reference's replays); "fill" uses all the room there is.
+  // The field: three canvases (trail, top, fog) at the size the settings ask for. Every animation
+  // frame simulates the round up to the clock (runner.ts) and draws it. "Like the original" draws one
+  // unit as window height ÷ 922 px, whatever the field (a duel is a smallish square, as in the
+  // reference's replays); "fill" uses all the room there is.
   import { onMount, type Snippet } from 'svelte';
   import { Renderer } from '../lib/render';
-  import type { World } from '../lib/world';
-  import type { Pending } from '../lib/predict';
+  import type { RoundRunner } from '../lib/runner';
   import type { FieldSize } from '../lib/prefs.svelte';
 
   type Props = {
-    world: World;
-    own: Set<string>;
-    predict: boolean;
-    aheadMs: () => number;
-    behindTicks: number;
-    inputFor: (pid: string) => { dir0: number; pending: Pending[] };
-    colourOf: (pid: string) => string;
+    runner: RoundRunner;
+    colourOf: (player: number) => string;
     size: FieldSize;
     /** Size the field from the parent's box minus this many px (the board beside it), and hug it. */
     reserve?: number;
@@ -24,7 +19,7 @@
     height?: number;
     children?: Snippet;
   };
-  let { world, own, predict, aheadMs, behindTicks, inputFor, colourOf, size, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
+  let { runner, colourOf, size, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
 
   const REFERENCE_UNITS = 922;
   let stage: HTMLDivElement;
@@ -36,44 +31,50 @@
   let open = $state(false);
   const hug = $derived(reserve >= 0);
 
+  // a crash bursts where it happened, in the curve's colour
+  let renderer: Renderer | null = null;
+  $effect(() => {
+    const r = runner;
+    return r.on((e) => {
+      if (e.e !== 'die' || !renderer) return;
+      const c = r.round.s.curves.find((x: any) => x.id === e.cid);
+      renderer.burst(e.x, e.y, colourOf(e.p), c ? r.round.motion(c).w : 6.9, performance.now());
+    });
+  });
+
   onMount(() => {
-    const renderer = new Renderer(trailCv, topCv, fogCv);
+    const ren = (renderer = new Renderer(trailCv, topCv, fogCv));
     let laidW = 0, laidH = 0, laidBox = '';
     const coarse = matchMedia('(pointer: coarse)');
 
     function layout(force = false) {
+      const W = runner.round.W, H = runner.round.H;
       const host = reserve >= 0 ? stage.parentElement! : stage;
       const boxW = host.clientWidth - Math.max(0, reserve), boxH = host.clientHeight;
       const key = `${boxW}x${boxH}:${size}:${coarse.matches}:${window.innerHeight}:${reserve}`;
-      if (!force && key === laidBox && laidW === world.W && laidH === world.H) return;
+      if (!force && key === laidBox && laidW === W && laidH === H) return;
       laidBox = key;
-      laidW = world.W;
-      laidH = world.H;
-      let s = Math.min(boxW / world.W, boxH / world.H);
+      laidW = W;
+      laidH = H;
+      let s = Math.min(boxW / W, boxH / H);
       const reference = size === 'reference' || (size === 'auto' && !coarse.matches);
       if (reference) s = Math.min(s, window.innerHeight / REFERENCE_UNITS);
-      cssW = Math.max(1, Math.floor(world.W * s));
+      cssW = Math.max(1, Math.floor(W * s));
+      cssH = Math.max(1, Math.floor(H * s));
       width = cssW;
       height = cssH;
-      cssH = Math.max(1, Math.floor(world.H * s));
-      renderer.resize(world, cssW, cssH, colourOf);
+      ren.resize(W, cssW, cssH);
     }
-
-    const off = world.onEvent((ev) => {
-      if (ev.e === 'die') {
-        const c = world.curves.get(ev.cid);
-        renderer.burst(ev.x, ev.y, colourOf(ev.pid), c?.m.w ?? 6.9, performance.now());
-      }
-    });
 
     let raf = 0;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       layout();
-      renderer.frame(world, { now, own, predict, aheadMs: aheadMs(), behindTicks, inputFor, colourOf });
+      const T = runner.tick(now);
+      ren.frame(runner, { now, T, colourOf });
       // Open Walls (blue, everyone): the edge turns dashed while it runs
       let wraps = false;
-      for (const c of world.curves.values()) if (c.alive && c.m.fx?.some(([kind]) => kind === 'openWalls')) wraps = true;
+      for (const c of runner.round.s.curves) if (c.alive && c.effects.some((e: any) => e.kind === 'openWalls')) wraps = true;
       if (wraps !== open) open = wraps;
     };
     raf = requestAnimationFrame(frame);
@@ -83,7 +84,7 @@
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      off();
+      renderer = null;
     };
   });
 </script>

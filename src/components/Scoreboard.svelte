@@ -2,23 +2,28 @@
   // Look A's board beside the field: the target (an outlined number, "2 points clear"), then everyone
   // by points: a little curve in their colour, the name, a "+n" ring that pops when they score, the
   // points in wide Archivo, and a thin bar towards the target. Dimmed once they crashed this round. In
-  // teams, each team's round wins head its players.
+  // teams, each team's round wins head its players. The points are the round's as this page
+  // simulates it (src/lib/runner.ts), so a point shows the moment the crash does.
   import type { Snippet } from 'svelte';
-  import type { World } from '../lib/world';
+  import type { RoundRunner } from '../lib/runner';
   import { t } from '../lib/i18n.svelte';
   import Avatar from './Avatar.svelte';
 
   type Player = { id: string; name: string; colour: string; team: number; avatar?: number[] | null };
-  type Props = { world: World; players: Player[]; me: string | null; version: number; children?: Snippet };
-  let { world, players, me, version, children }: Props = $props();
+  type Props = { runner: RoundRunner; players: Player[]; me: string | null; version: number; children?: Snippet };
+  let { runner, players, me, version, children }: Props = $props();
 
   let chips = $state<Record<string, { n: number; at: number }>>({});
   let seen: Record<string, number> = {};
 
+  const board = $derived.by(() => {
+    void version;
+    return runner.board();
+  });
+
   // a "+n" when someone scores (n adds up while the ring still shows)
   $effect(() => {
-    void version;
-    const pts = world.points;
+    const pts = board.points;
     const now = performance.now();
     for (const p of players) {
       const v = pts[p.id] ?? 0;
@@ -31,28 +36,18 @@
     }
   });
 
-  const info = $derived.by(() => {
-    void version;
-    return { type: world.type, target: world.target, teamTarget: world.teamTarget, phase: world.phase };
-  });
+  const info = $derived({ type: board.type, target: board.target, teamTarget: board.teamTarget, phase: board.phase });
 
-  const rows = $derived.by(() => {
-    void version;
-    const pts = world.points;
-    return players
-      .map((p) => ({
-        ...p,
-        points: pts[p.id] ?? 0,
-        alive: [...world.curves.values()].some((c) => c.pid === p.id && c.alive),
-      }))
-      .sort((a, b) => b.points - a.points);
-  });
+  const rows = $derived(
+    players
+      .map((p) => ({ ...p, points: board.points[p.id] ?? 0, alive: board.alive.has(p.id) }))
+      .sort((a, b) => b.points - a.points),
+  );
 
   const teams = $derived.by(() => {
-    void version;
-    if (world.type !== 'teams') return [];
+    if (board.type !== 'teams') return [];
     const ids = [...new Set(players.map((p) => p.team))].sort();
-    return ids.map((team) => ({ team, wins: world.teamWins[team] ?? 0, members: rows.filter((r) => r.team === team) }));
+    return ids.map((team) => ({ team, wins: board.teamWins[team] ?? 0, members: rows.filter((r) => r.team === team) }));
   });
 </script>
 

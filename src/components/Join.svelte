@@ -53,6 +53,7 @@
     } catch (e) {
       const why = (e as { code?: string }).code;
       if (why === 'no-room') missing = true;
+      else if (why === 'kicked') error = t('The host took you out of the room.');
       else error = why === 'full' ? t('The room is full.') : t('That didn’t work. Try again.');
     }
   }

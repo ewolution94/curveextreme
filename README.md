@@ -9,9 +9,12 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
 
 ## How it works
 
-- **One engine** (`shared/engine.mjs`): the whole game as a deterministic simulation in fixed ticks.
-  The server runs it for rooms, the page runs it for the shared keyboard, and the page's prediction
-  of your own curve uses the same `steer()`.
+- **One engine** (`shared/engine.mjs`): the whole game as a deterministic simulation in fixed
+  frames, run by every page and by the server. The same round start and the same steering actions
+  give the same state to the last bit in every JavaScript engine: the seed makes the randomness, and
+  the maths is its own (`shared/dmath.mjs`: sine and cosine from +, −, ×, ÷ alone, since `Math.sin`
+  may differ between Chrome and Safari in the last bit). A steering change applies at the moment
+  within the frame it happened, along exact arcs.
 - **Everything that makes the feel is data**, so a playtest changes the game without code:
   - `shared/feel.mjs`: the feel profile (speed, turn radius, line width, hit size, gaps, the phases
     before a round, tick rate, field size…). Classic is the reference as measured; GS++ its fast mode.
@@ -21,12 +24,24 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
 - **The Tune panel** (lobby → Feel, or Tune in a game, host only): every feel number as a dial, the
   measured value as an orange notch; changes apply from the next round. *Save as* keeps a profile on
   the server (`$DATA_DIR/profiles.json`) for the next room and the shared keyboard.
-- **How the page shows the game** is a device setting (Settings): the field at the reference's scale
-  (window height ÷ 922 px per unit) or the whole screen; your curve drawn ahead with the keys you
-  hold (instant) or a tick behind (from the server); others shown 0–3 ticks in the past.
-- **Rooms** (`server/rooms.mjs`) over a dependency-free WebSocket server (`server/ws.mjs`) at `/ws`:
-  every tick goes to every page as JSON (positions, events); your inputs are numbered and the server
-  says which one it applied last, so the page can draw your curve ahead without waiting for it.
+- **Netcode: inputs, not positions** (`shared/protocol.mjs`). Getting into a room is an HTTP seat
+  reservation (`POST /api/rooms`, `POST /api/rooms/CODE/seats`), then the room's WebSocket with the
+  session it gave (`/ws?session=…`, a dependency-free server in `server/ws.mjs`), binary `[type,
+  payload]` messages (`shared/wire.mjs`, a MessagePack subset). A round starts with its seed and the
+  server time of frame 0; each page measures the server's clock with pings (`src/lib/clock.ts`) and
+  simulates the round itself, the frame always coming from the clock. Only steering changes travel:
+  `[round, frame, player, actionNum, sub, dir, press]`, one on a press, one on a release, about a
+  dozen bytes. Your own goes into your round at once; another player's comes relayed, and if its
+  frame is already past, the page rewinds to the snapshot before it and simulates forward again
+  (`shared/timeline.mjs`), which ends exactly where it would have.
+- **The server is the referee** (`server/rooms.mjs`): it runs the same round `NET.authority` ms behind
+  the clock, takes an action whose frame it hasn't simulated yet and relays it, rejects a later one
+  (the page takes it back and sends what you're holding again), and owns who's in, colours and teams,
+  who's out (its word decides), the points and the rounds. Late joiners get the round's start and
+  every action so far and simulate up to now. The host can take someone out of the room (kick).
+  The timings (`NET`) are data like the feel.
+- **The field's size** is a device setting (Settings): the reference's scale (window height ÷ 922 px
+  per unit) or the whole screen.
 - **On the device only**: XP (your points plus 10 for a win), levels (they unlock colours), stats.
 
 ## Run it
@@ -50,10 +65,12 @@ npm run build && npm start   # the production server on :8080
 ## Layout
 
 ```
-shared/     the engine, the feel profiles, the powerups, the modes, the colours (server and page)
+shared/     the engine, its maths and timeline, the protocol and wire format, the feel profiles,
+            the powerups, the modes, the colours (server and page)
 server/     server.mjs (static files, headers, /healthz), app.mjs, rooms.mjs, ws.mjs, profiles.mjs
-src/lib/    net (the socket), world (a round as the page knows it), predict, render, icons, input,
-            online (a room), local (the shared keyboard), progress (XP, stats), prefs, sound, i18n
+src/lib/    net (reservation and socket), clock (the server's clock), runner (a round on the clock),
+            render, icons, input, online (a room), local (the shared keyboard), progress (XP,
+            stats), prefs, sound, i18n
 src/components/  Home, Lobby, Play, Results, Local, Field, Scoreboard, Tuner, the sheets
 tests/      *.test.mjs (unit, CI) and *.sim.mjs (simulations, local)
 ```
@@ -61,7 +78,7 @@ tests/      *.test.mjs (unit, CI) and *.sim.mjs (simulations, local)
 ## Deploy (NAS)
 
 A push to `release` is the deploy: `docker-publish.yml` runs CI (`ci.yml`: types, unit tests, the build,
-a smoke test of the production server with a room over the socket), publishes
+a smoke test of the production server: a seat reserved, the binary socket), publishes
 `ghcr.io/ewolution94/curveextreme:latest`, and the shared Watchtower recreates the container from
 `deploy/portainer-stack.yml` (port 7000, the `/data` volume, Census over the `ewolution` network).
 https://curveextreme.ewolution.cloud/ through the Cloudflare tunnel. A deploy ends running rooms.

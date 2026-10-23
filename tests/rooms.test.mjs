@@ -1,13 +1,19 @@
-// The real server over real WebSockets: a room with a code, two players, a round, inputs acked,
-// a late joiner who gets the field so far. Short: the still and free phases are tuned to zero.
+// The real server over HTTP and real WebSockets: a seat reservation, the binary socket, a round
+// started on the shared clock, an action relayed to the other page, a late one rejected, a late
+// joiner given the round so far, a kick, the server's word on who's out, the next round. Short: the
+// still and free phases are tuned down.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { encode, decode } from '../shared/wire.mjs';
+import { UP, DOWN, toAction } from '../shared/protocol.mjs';
+import { CLASSIC } from '../shared/feel.mjs';
 
 const PORT = 6900 + Math.floor(Math.random() * 90);
+const BASE = `http://127.0.0.1:${PORT}`;
 
 function startServer() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'cx-'));
@@ -18,85 +24,156 @@ function startServer() {
   return new Promise((resolve) => child.stdout.once('data', () => resolve(child)));
 }
 
-function client(id) {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-  const inbox = [];
-  const waiters = [];
-  ws.addEventListener('message', (ev) => {
-    const msg = JSON.parse(ev.data);
-    inbox.push(msg);
-    for (const w of [...waiters]) if (w.test(msg)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(msg); }
+const who = (name, secret = `secret-${name}-0000`) => ({ id: `id-${name}-0000`, secret, name });
+
+async function reserve(code, person) {
+  const res = await fetch(code ? `${BASE}/api/rooms/${code}/seats` : `${BASE}/api/rooms`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(person),
   });
-  const api = {
-    ws, inbox,
-    send: (m) => ws.send(JSON.stringify(m)),
-    next: (test, ms = 3000) => {
-      const found = inbox.find(test);
-      if (found) { inbox.splice(inbox.indexOf(found), 1); return Promise.resolve(found); }
-      return new Promise((resolve, reject) => {
-        const w = { test, resolve: (m) => { inbox.splice(inbox.indexOf(m), 1); resolve(m); } };
-        waiters.push(w);
-        setTimeout(() => reject(new Error(`timed out waiting (${id})`)), ms);
-      });
-    },
-  };
-  return new Promise((resolve) => ws.addEventListener('open', () => {
-    api.send({ t: 'hello', id: `id-${id}-0000`, secret: `secret-${id}-0000`, name: id, colour: '#ff4d4d' });
-    resolve(api);
-  }));
+  return { status: res.status, body: await res.json() };
 }
 
-test('a room: create, join, play a round, ack inputs, join late', async () => {
+function client(session, name) {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?session=${session}`);
+  ws.binaryType = 'arraybuffer';
+  const inbox = [];
+  const waiters = [];
+  let closed = null;
+  ws.addEventListener('close', (e) => {
+    closed = e.code;
+    for (const w of [...waiters]) if (w.type === 'close') (waiters.splice(waiters.indexOf(w), 1), w.resolve(e.code));
+  });
+  ws.addEventListener('message', (ev) => {
+    const [type, payload] = decode(new Uint8Array(ev.data));
+    inbox.push({ type, payload });
+    for (const w of [...waiters]) {
+      if (w.type === type && w.test(payload)) {
+        waiters.splice(waiters.indexOf(w), 1);
+        inbox.splice(inbox.findIndex((m) => m.payload === payload), 1);
+        w.resolve(payload);
+      }
+    }
+  });
+  const api = {
+    ws,
+    send: (type, payload) => ws.send(encode([type, payload])),
+    next(type, test = () => true, ms = 6000) {
+      const i = inbox.findIndex((m) => m.type === type && test(m.payload));
+      if (i >= 0) return Promise.resolve(inbox.splice(i, 1)[0].payload);
+      return new Promise((resolve, reject) => {
+        waiters.push({ type, test, resolve });
+        setTimeout(() => reject(new Error(`${name}: no message ${type} in time`)), ms);
+      });
+    },
+    closed(ms = 4000) {
+      if (closed !== null) return Promise.resolve(closed);
+      return new Promise((resolve, reject) => {
+        waiters.push({ type: 'close', test: () => true, resolve });
+        setTimeout(() => reject(new Error(`${name}: not closed`)), ms);
+      });
+    },
+    /** The server's clock now, from one ping. */
+    async serverNow() {
+      const c = performance.now();
+      api.send(UP.PING, [c]);
+      const [, s] = await api.next(DOWN.PONG, (p) => p[0] === c);
+      return s + (performance.now() - c) / 2;
+    },
+  };
+  return api;
+}
+
+test('rooms: reservations, the binary socket, a round on the shared clock, actions, a kick', async () => {
   const server = await startServer();
   try {
-    const a = await client('anna');
-    await a.next((m) => m.t === 'hi');
-    a.send({ t: 'create' });
-    const room = await a.next((m) => m.t === 'room');
-    assert.match(room.code, /^[A-Z]{4}$/);
-    assert.equal(room.host, 'id-anna-0000');
+    // a room, and a seat in it
+    const ra = await reserve(null, who('anna'));
+    assert.equal(ra.status, 200);
+    assert.match(ra.body.code, /^[A-Z]{4}$/);
+    const code = ra.body.code;
+    const a = client(ra.body.session, 'anna');
+    const initA = await a.next(DOWN.INIT);
+    assert.equal(initA.view.host, 'id-anna-0000');
+    assert.equal(initA.round, null);
 
-    const b = await client('ben');
-    b.send({ t: 'peek', code: room.code.toLowerCase() });
-    const peek = await b.next((m) => m.t === 'peek');
-    assert.deepEqual(peek, { t: 'peek', code: room.code, exists: true, full: false });
-    b.send({ t: 'peek', code: 'ZZZZ' });
-    assert.equal((await b.next((m) => m.t === 'peek')).exists, room.code === 'ZZZZ');
-    b.send({ t: 'join', code: room.code });
-    const seen = await b.next((m) => m.t === 'room' && m.members.length === 2);
-    const colours = seen.members.map((m) => m.colour);
-    assert.notEqual(colours[0], colours[1], 'two players, two colours');
+    assert.deepEqual(await (await fetch(`${BASE}/api/rooms/${code.toLowerCase()}`)).json(), { exists: true, full: false });
+    assert.equal((await (await fetch(`${BASE}/api/rooms/ZZZZ`)).json()).exists, code === 'ZZZZ');
+    assert.equal((await reserve('ZZZQ', who('nobody'))).status, code === 'ZZZQ' ? 200 : 404);
+    assert.equal((await reserve(code, who('anna', 'secret-wrong-0000'))).status, 403, 'someone else’s id');
 
-    // only the host changes settings
-    b.send({ t: 'settings', patch: { mode: 'none' } });
-    a.send({ t: 'settings', patch: { mode: 'none', feel: { stillTime: 0, freeTime: 0 } } });
-    const set = await a.next((m) => m.t === 'room' && m.settings.mode === 'none');
-    assert.equal(set.settings.feel.stillTime, 0);
+    // a socket without a valid session is closed
+    const stray = client('nonsense', 'stray');
+    assert.equal(await stray.closed(), 4401);
 
-    a.send({ t: 'start' });
-    const round = await b.next((m) => m.t === 'round');
-    assert.equal(round.curves.length, 2);
-    assert.equal(round.rate, 50);
+    const rb = await reserve(code, who('ben'));
+    assert.equal(rb.status, 200);
+    const b = client(rb.body.session, 'ben');
+    await b.next(DOWN.INIT);
+    await a.next(DOWN.UPDATE, (u) => u.view?.members.filter((m) => m.connected).length === 2);
 
-    b.send({ t: 'in', s: 1, d: 1 });
-    const acked = await b.next((m) => m.t === 's' && m.a?.['id-ben-0000'] === 1);
-    assert.ok(acked.c.length >= 1);
+    // the host tunes the round short, and starts
+    a.send(UP.SETTINGS, { feel: { ...CLASSIC, stillTime: 0.3, freeTime: 0, lingerTime: 0.3 } });
+    await b.next(DOWN.UPDATE, (u) => u.view?.settings.feel.stillTime === 0.3);
+    a.send(UP.START, {});
+    const cd = await b.next(DOWN.COUNTDOWN_START);
+    assert.equal(cd.no, 1);
+    const { start, at } = await a.next(DOWN.ROUND_START);
+    await b.next(DOWN.ROUND_START);
+    assert.equal(start.players.length, 2);
+    assert.equal(typeof start.seed, 'number');
+    const me = start.players.findIndex((p) => p.id === 'id-anna-0000');
+    const frameMs = 1000 / start.feel.tickRate;
 
-    a.send({ t: 'ping', c: 123 });
-    assert.equal((await a.next((m) => m.t === 'pong')).c, 123);
+    // an action for the frame the clock is in now reaches the other page
+    const now = await a.serverNow();
+    const frame = Math.max(0, Math.floor((now - at) / frameMs));
+    const action = [start.no, frame, me, 1, 420, 1, 1];
+    a.send(UP.ACTION, action);
+    assert.deepEqual(await b.next(DOWN.ACTION_ADD), action);
 
-    // a third page in the middle of the round gets the round and the lines so far
-    await new Promise((r) => setTimeout(r, 300));
-    const c = await client('cleo');
-    c.send({ t: 'join', code: room.code });
-    await c.next((m) => m.t === 'round');
-    const snap = await c.next((m) => m.t === 'snap');
-    assert.ok(snap.runs.length >= 1, 'lines so far');
-    const view = await c.next((m) => m.t === 'room' && m.members.length === 3);
-    assert.equal(view.members.find((m) => m.id === 'id-cleo-0000').playing, false, 'watches until the next game');
+    // one from long ago is rejected
+    await new Promise((r) => setTimeout(r, 700));
+    a.send(UP.ACTION, [start.no, 0, me, 2, 0, 0, 0]);
+    assert.deepEqual(await a.next(DOWN.ACTION_REJECT), [start.no, me, 2]);
+    // and one for another player is ignored
+    a.send(UP.ACTION, [start.no, frame + 40, 1 - me, 3, 0, -1, 0]);
 
-    for (const x of [a, b, c]) x.ws.close();
+    // a late joiner watches, and gets the round so far
+    const rc = await reserve(code, who('cara'));
+    const c = client(rc.body.session, 'cara');
+    const initC = await c.next(DOWN.INIT);
+    assert.equal(initC.round.start.seed, start.seed);
+    assert.deepEqual(initC.round.actions, [action]);
+    assert.equal(initC.view.members.find((m) => m.id === 'id-cara-0000').playing, false);
+
+    // the host kicks the watcher: gone, and can't come back
+    a.send(UP.KICK, { id: 'id-cara-0000' });
+    await c.next(DOWN.KICKED);
+    assert.equal(await c.closed(), 4403);
+    assert.equal((await reserve(code, who('cara'))).status, 403);
+
+    // nobody steers: both curves reach the walls; the server says who's out, then the next round
+    const deaths = await b.next(DOWN.UPDATE, (u) => Array.isArray(u.deaths), 9000);
+    assert.ok(deaths.deaths.every(([k, p]) => Number.isInteger(k) && (p === 0 || p === 1)));
+    const pts = await b.next(DOWN.UPDATE, (u) => u.points, 9000);
+    assert.equal(Object.keys(pts.points).length, 2);
+    const next = await b.next(DOWN.COUNTDOWN_START, (x) => x.no === 2, 9000);
+    assert.equal(next.no, 2);
+    const r2 = await b.next(DOWN.ROUND_START, (x) => x.start.no === 2, 3000);
+    assert.notEqual(r2.start.seed, start.seed);
+
+    // the host ends the game: back in the lobby
+    a.send(UP.STOP, {});
+    await b.next(DOWN.UPDATE, (u) => u.view?.phase === 'lobby');
+    a.ws.close();
+    b.ws.close();
   } finally {
-    server.kill('SIGTERM');
+    server.kill();
   }
+});
+
+test('the action format is the guide’s positional array', () => {
+  assert.deepEqual(toAction([3, 120, 1, 7, 500, -1, 0]), { round: 3, frame: 120, player: 1, num: 7, sub: 500, dir: -1, press: 0 });
 });

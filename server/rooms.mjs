@@ -1,25 +1,39 @@
-// Rooms with a code: the lobby, the host's settings, and the game loop that runs a Match
-// (shared/engine.mjs) in fixed ticks and sends every tick to every page over its WebSocket.
+// Rooms with a code, and the referee of their games (development/plans/curveextreme.md, "Netcode").
 //
-// Page → server:  hello, create, join, leave, me, settings, start, stop, in, ping, profiles,
-//                 saveProfile
-// Server → page:  hi, room, round, snap, s (a tick), over, pong, profiles, error
+// Getting in takes two steps: an HTTP seat reservation (POST /api/rooms to open one, POST
+// /api/rooms/CODE/seats to join; app.mjs) answers with a session, and the page opens the room's
+// WebSocket with it. Everything on the socket is binary [type, payload] (shared/wire.mjs,
+// shared/protocol.mjs).
+//
+// During a round nobody sends positions. The server sends the round's start (its seed and players)
+// with the server time of frame 0; every page simulates the round itself on that shared clock. The
+// pages send steering actions, each stamped with its frame and the moment within it; the server
+// runs the same simulation NET.authority ms behind the clock, takes an action if its frame is still
+// ahead of its own and relays it to everyone else, and rejects one that came too late. It owns the
+// rest: who's in, the teams and colours, who's out (its word decides a disagreement), the scores,
+// the rounds.
 
 import { Match } from '../shared/engine.mjs';
+import { Timeline } from '../shared/timeline.mjs';
 import { BUILT_IN, cleanFeel } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { POWERUPS, POWERUP_KINDS } from '../shared/powerups.mjs';
 import { isColour, freeColour } from '../shared/colours.mjs';
+import { encode, decode } from '../shared/wire.mjs';
+import { UP, DOWN, NET, SUBS, toAction, fromAction } from '../shared/protocol.mjs';
 import { cleanAvatar } from './avatar.mjs';
 
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const MAX_PLAYERS = 10;
+const MAX_MEMBERS = MAX_PLAYERS * 2;
 const MAX_ROOMS = 200;
 const EMPTY_FOR = 10 * 60 * 1000; // an empty room goes after ten minutes
-const NEXT_ROUND = 400; // ms between a round's end and the next one's start
+const SESSION_FOR = 60 * 1000; // a reservation not used within a minute lapses
 const ID = /^[a-z0-9-]{8,64}$/i;
 
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, n);
+const int = (v) => Number.isInteger(v);
+const token = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 
 function defaultSettings() {
   return {
@@ -34,9 +48,24 @@ function defaultSettings() {
   };
 }
 
-export function createRooms({ profiles }) {
+/** Who a reservation is for, from the request body; null if it doesn't hold up. */
+export function cleanWho(body) {
+  if (!body || typeof body !== 'object') return null;
+  if (!ID.test(String(body.id)) || !ID.test(String(body.secret))) return null;
+  return {
+    id: String(body.id),
+    secret: String(body.secret),
+    name: clean(body.name, 20) || 'Player',
+    colour: isColour(body.colour) ? body.colour : null,
+    avatar: cleanAvatar(body.avatar),
+  };
+}
+
+export function createRooms({ profiles, clock = () => performance.now() }) {
   /** @type {Map<string, Room>} */
   const rooms = new Map();
+  /** session → { room, id, until } */
+  const sessions = new Map();
 
   function newCode() {
     for (;;) {
@@ -46,86 +75,58 @@ export function createRooms({ profiles }) {
     }
   }
 
-  /** A page connected: one per tab. */
-  function connect(ws) {
-    const conn = { ws, id: null, secret: null, name: 'Player', colour: null, avatar: null, room: null };
-    ws.on('message', (text) => {
+  /**
+   * A seat: in a new room (code null) or the room with this code. Returns { status, body }: 200 with
+   * { code, session }, or 404 no-room, 409 full, 403 taken (the id is someone else's) or kicked.
+   */
+  function reserve(code, who) {
+    let room;
+    if (code === null) {
+      if (rooms.size >= MAX_ROOMS) return { status: 503, body: { code: 'busy' } };
+      room = new Room(newCode());
+      rooms.set(room.code, room);
+    } else {
+      room = rooms.get(String(code).toUpperCase());
+      if (!room) return { status: 404, body: { code: 'no-room' } };
+    }
+    const why = room.seat(who);
+    if (why) return { status: why === 'full' ? 409 : 403, body: { code: why } };
+    const session = token();
+    sessions.set(session, { room, id: who.id, until: Date.now() + SESSION_FOR });
+    return { status: 200, body: { code: room.code, session } };
+  }
+
+  function peek(code) {
+    const room = rooms.get(String(code).toUpperCase());
+    return { exists: !!room, full: !!room && room.members.size >= MAX_MEMBERS };
+  }
+
+  /** A page opened the socket with its session. */
+  function connect(ws, session) {
+    const s = sessions.get(session);
+    sessions.delete(session);
+    if (!s || s.until < Date.now() || !s.room.members.has(s.id) || rooms.get(s.room.code) !== s.room) {
+      ws.close(4401);
+      return;
+    }
+    const conn = { ws, id: s.id, room: s.room, send: (type, payload) => ws.sendBinary(encode([type, payload])) };
+    ws.on('message', (data, binary) => {
+      if (!binary) return;
       let msg;
       try {
-        msg = JSON.parse(text);
+        msg = decode(data);
       } catch {
         return;
       }
-      if (!msg || typeof msg.t !== 'string') return;
+      if (!Array.isArray(msg) || !int(msg[0])) return;
       try {
-        handle(conn, msg);
+        conn.room?.handle(conn, msg[0], msg[1]);
       } catch (err) {
         console.error(err);
       }
     });
     ws.on('close', () => conn.room?.disconnect(conn));
-  }
-
-  function handle(conn, msg) {
-    const send = (m) => conn.ws.send(JSON.stringify(m));
-    switch (msg.t) {
-      case 'hello':
-        if (!ID.test(String(msg.id)) || !ID.test(String(msg.secret))) return send({ t: 'error', code: 'bad-id' });
-        conn.id = String(msg.id);
-        conn.secret = String(msg.secret);
-        conn.name = clean(msg.name, 20) || 'Player';
-        conn.colour = isColour(msg.colour) ? msg.colour : null;
-        conn.avatar = cleanAvatar(msg.avatar);
-        return send({ t: 'hi', protocol: 1 });
-      case 'ping':
-        return send({ t: 'pong', c: msg.c });
-      case 'profiles':
-        return send({ t: 'profiles', ...profiles.list() });
-      case 'peek': {
-        // A room's link, before the name is asked: is the room there, and is there room in it?
-        const code = String(msg.code ?? '').toUpperCase().slice(0, 8);
-        const room = rooms.get(code);
-        return send({ t: 'peek', code, exists: !!room, full: !!room && room.members.size >= MAX_PLAYERS * 2 });
-      }
-    }
-    if (!conn.id) return send({ t: 'error', code: 'no-hello' });
-    switch (msg.t) {
-      case 'create': {
-        if (rooms.size >= MAX_ROOMS) return send({ t: 'error', code: 'full' });
-        conn.room?.leave(conn);
-        const room = new Room(newCode());
-        rooms.set(room.code, room);
-        return room.join(conn);
-      }
-      case 'join': {
-        const room = rooms.get(String(msg.code ?? '').toUpperCase());
-        if (!room) return send({ t: 'error', code: 'no-room' });
-        if (conn.room && conn.room !== room) conn.room.leave(conn);
-        return room.join(conn);
-      }
-    }
-    const room = conn.room;
-    if (!room) return send({ t: 'error', code: 'no-room' });
-    switch (msg.t) {
-      case 'leave':
-        return room.leave(conn);
-      case 'me':
-        return room.me(conn, msg);
-      case 'settings':
-        return room.settingsFrom(conn, msg.patch);
-      case 'start':
-        return room.start(conn);
-      case 'stop':
-        return room.stop(conn);
-      case 'in':
-        return room.input(conn, msg);
-      case 'saveProfile': {
-        if (room.host !== conn.id) return;
-        const saved = profiles.save(msg.feel);
-        if (!saved) return send({ t: 'error', code: 'bad-profile' });
-        return room.broadcast({ t: 'profiles', ...profiles.list() });
-      }
-    }
+    s.room.attach(conn);
   }
 
   class Room {
@@ -134,89 +135,70 @@ export function createRooms({ profiles }) {
       this.host = null;
       /** @type {Map<string, any>} id → member */
       this.members = new Map();
+      this.kicked = new Set();
       this.settings = defaultSettings();
       this.phase = 'lobby'; // lobby | playing | results
-      this.match = null;
-      this.round = null; // the current round's start message
       this.results = null;
-      this.running = false;
-      this.timer = null;
-      this.emptySince = 0;
+      this.emptySince = Date.now();
+      this.game = null; // the match being played (start())
     }
 
-    view() {
-      return {
-        t: 'room',
-        code: this.code,
-        host: this.host,
-        phase: this.phase,
-        settings: this.settings,
-        members: [...this.members.values()].map((m) => ({
-          id: m.id, name: m.name, colour: m.colour, avatar: m.avatar, team: m.team,
-          connected: !!m.conn, playing: !!this.match?.players.some((p) => p.id === m.id),
-        })),
-        results: this.results,
-      };
-    }
+    // ---- who's in -------------------------------------------------------------------------
 
-    broadcast(msg) {
-      const text = typeof msg === 'string' ? msg : JSON.stringify(msg);
-      for (const m of this.members.values()) m.conn?.ws.send(text);
-    }
-
-    join(conn) {
-      let m = this.members.get(conn.id);
-      if (m && m.secret !== conn.secret) return conn.ws.send(JSON.stringify({ t: 'error', code: 'taken' }));
+    /** A reservation: the member made or brought up to date. Returns why not, or null. */
+    seat(who) {
+      if (this.kicked.has(who.id)) return 'kicked';
+      let m = this.members.get(who.id);
+      if (m && m.secret !== who.secret) return 'taken';
       if (!m) {
-        if (this.members.size >= MAX_PLAYERS * 2) return conn.ws.send(JSON.stringify({ t: 'error', code: 'full' }));
+        if (this.members.size >= MAX_MEMBERS) return 'full';
         const taken = new Set([...this.members.values()].map((x) => x.colour));
         m = {
-          id: conn.id, secret: conn.secret, name: conn.name, avatar: conn.avatar ?? cleanAvatar(null),
-          colour: conn.colour && !taken.has(conn.colour) ? conn.colour : freeColour(taken),
+          id: who.id, secret: who.secret, name: who.name, avatar: who.avatar,
+          colour: who.colour && !taken.has(who.colour) ? who.colour : freeColour(taken),
           team: this.smallestTeam(),
-          input: { dir: 0, presses: [], seq: 0 },
           conn: null,
+          reserved: Date.now(),
         };
         this.members.set(m.id, m);
+      } else {
+        m.name = who.name;
+        m.avatar = who.avatar;
+        m.reserved = Date.now();
       }
-      if (m.conn && m.conn !== conn) m.conn.ws.close(4000); // the same player in a newer tab
-      m.conn = conn;
-      m.name = conn.name;
-      if (conn.avatar) m.avatar = conn.avatar;
-      m.input = { dir: 0, presses: [], seq: 0 }; // a new page numbers its inputs from 1 again
-      conn.room = this;
       this.emptySince = 0;
-      if (!this.host || !this.members.get(this.host)?.conn) this.host = m.id;
-      conn.ws.send(JSON.stringify({ t: 'profiles', ...profiles.list() }));
-      this.broadcast(this.view());
-      // in the middle of a game: the round so far
-      if (this.phase === 'playing' && this.round && this.match?.r) {
-        conn.ws.send(JSON.stringify(this.round));
-        conn.ws.send(JSON.stringify(this.match.snapshot()));
-      }
+      return null;
     }
 
-    smallestTeam() {
-      const counts = Array.from({ length: this.settings?.teams ?? 2 }, () => 0);
-      for (const m of this.members.values()) if (m.team < counts.length) counts[m.team]++;
-      return counts.indexOf(Math.min(...counts));
+    attach(conn) {
+      const m = this.members.get(conn.id);
+      if (m.conn && m.conn !== conn) {
+        m.conn.room = null; // the same player in a newer tab: the old one goes quietly
+        m.conn.ws.close(4000);
+      }
+      m.conn = conn;
+      if (!this.host || !this.members.get(this.host)?.conn) this.host = m.id;
+      conn.send(DOWN.INIT, this.init(m));
+      this.broadcast(DOWN.UPDATE, { view: this.view() }, conn);
     }
 
     disconnect(conn) {
       const m = this.members.get(conn.id);
       if (!m || m.conn !== conn) return;
       m.conn = null;
-      m.input = { dir: 0, presses: [], seq: m.input.seq };
-      if (this.phase !== 'playing' && !this.match?.players.some((p) => p.id === m.id)) this.members.delete(m.id);
+      if (this.playing(m.id)) this.letGo(m.id);
+      else this.members.delete(m.id);
       this.afterLeave();
     }
 
     leave(conn) {
       const m = this.members.get(conn.id);
       conn.room = null;
-      if (!m) return;
+      conn.ws.close(1000);
+      if (!m || m.conn !== conn) return;
       m.conn = null;
-      if (!this.match?.players.some((p) => p.id === m.id) || this.phase !== 'playing') this.members.delete(m.id);
+      if (this.playing(m.id)) this.letGo(m.id);
+      else this.members.delete(m.id);
       this.afterLeave();
     }
 
@@ -226,31 +208,129 @@ export function createRooms({ profiles }) {
         this.emptySince = Date.now();
         this.halt();
         this.phase = 'lobby';
-        this.match = null;
-        this.round = null;
+        this.game = null;
         return;
       }
       if (!this.members.get(this.host)?.conn) this.host = connected[0].id;
-      this.broadcast(this.view());
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
+    }
+
+    kick(conn, id) {
+      if (conn.id !== this.host || id === conn.id) return;
+      const m = this.members.get(id);
+      if (!m) return;
+      this.kicked.add(id);
+      const g = this.game;
+      if (g?.tl) {
+        const p = g.order.indexOf(id);
+        if (p >= 0 && !g.announced.has(p) && g.tl.round.playerAlive(p)) {
+          // out at the server's next frame, on every page too
+          const k = g.tl.k;
+          g.tl.kill(k, p);
+          g.deaths.push([k, p]);
+          g.announced.add(p);
+          this.broadcast(DOWN.UPDATE, { deaths: [[k, p]] });
+        }
+      }
+      if (!this.playing(id)) this.members.delete(id);
+      const was = m.conn;
+      m.conn = null;
+      if (was) {
+        was.room = null;
+        was.send(DOWN.KICKED, {});
+        was.ws.close(4403);
+      }
+      this.afterLeave();
+    }
+
+    smallestTeam() {
+      const counts = Array.from({ length: this.settings?.teams ?? 2 }, () => 0);
+      for (const m of this.members.values()) if (m.team < counts.length) counts[m.team]++;
+      return counts.indexOf(Math.min(...counts));
+    }
+
+    /** In the match being played (they stay in its standings even when gone). */
+    playing(id) {
+      return !!this.game?.order.includes(id);
     }
 
     me(conn, msg) {
       const m = this.members.get(conn.id);
-      if (!m) return;
+      if (!m || !msg || typeof msg !== 'object') return;
       if (msg.name !== undefined) m.name = clean(msg.name, 20) || m.name;
-      if (msg.avatar !== undefined) {
-        m.avatar = cleanAvatar(msg.avatar);
-        conn.avatar = m.avatar;
-      }
+      if (msg.avatar !== undefined) m.avatar = cleanAvatar(msg.avatar);
       if (msg.colour !== undefined && isColour(msg.colour)) {
         const taken = [...this.members.values()].some((x) => x !== m && x.colour === msg.colour);
         if (!taken) m.colour = msg.colour;
       }
       if (msg.team !== undefined && this.phase !== 'playing') {
         const team = Number(msg.team);
-        if (Number.isInteger(team) && team >= 0 && team < this.settings.teams) m.team = team;
+        if (int(team) && team >= 0 && team < this.settings.teams) m.team = team;
       }
-      this.broadcast(this.view());
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
+    }
+
+    view() {
+      return {
+        code: this.code,
+        host: this.host,
+        phase: this.phase,
+        settings: this.settings,
+        members: [...this.members.values()].map((m) => ({
+          id: m.id, name: m.name, colour: m.colour, avatar: m.avatar, team: m.team,
+          connected: !!m.conn, playing: this.playing(m.id),
+        })),
+        results: this.results,
+      };
+    }
+
+    /** Everything a page needs on joining: the room, and the round so far to simulate up to now. */
+    init(m) {
+      const g = this.game;
+      return {
+        you: m.id,
+        now: clock(),
+        view: this.view(),
+        profiles: profiles.list(),
+        match: g ? { points: g.match.points, teamWins: g.match.teamWins } : null,
+        round: g?.tl ? { start: g.tl.round.start, at: g.at, actions: g.log, deaths: g.deaths, nums: g.nums } : null,
+        countdown: g?.countdown ?? null,
+      };
+    }
+
+    broadcast(type, payload, except = null) {
+      const bytes = encode([type, payload]);
+      for (const m of this.members.values()) if (m.conn && m.conn !== except) m.conn.ws.sendBinary(bytes);
+    }
+
+    // ---- messages -------------------------------------------------------------------------
+
+    handle(conn, type, payload) {
+      switch (type) {
+        case UP.PING:
+          if (Array.isArray(payload) && typeof payload[0] === 'number') conn.send(DOWN.PONG, [payload[0], clock()]);
+          return;
+        case UP.ACTION:
+          return this.action(conn, payload);
+        case UP.ME:
+          return this.me(conn, payload);
+        case UP.SETTINGS:
+          return this.settingsFrom(conn, payload);
+        case UP.START:
+          return this.start(conn);
+        case UP.STOP:
+          return this.stop(conn);
+        case UP.LEAVE:
+          return this.leave(conn);
+        case UP.KICK:
+          return this.kick(conn, String(payload?.id ?? ''));
+        case UP.SAVE_PROFILE: {
+          if (this.host !== conn.id) return;
+          const saved = profiles.save(payload);
+          if (!saved) return conn.send(DOWN.ERROR, { code: 'bad-profile' });
+          return this.broadcast(DOWN.UPDATE, { profiles: profiles.list() });
+        }
+      }
     }
 
     /** The host's settings. A new feel or mode reaches a running game at its next round. */
@@ -258,7 +338,7 @@ export function createRooms({ profiles }) {
       if (conn.id !== this.host || !patch || typeof patch !== 'object') return;
       const s = this.settings;
       if (patch.type === 'ffa' || patch.type === 'teams') s.type = patch.type;
-      if (Number.isInteger(patch.teams) && patch.teams >= 2 && patch.teams <= 4) {
+      if (int(patch.teams) && patch.teams >= 2 && patch.teams <= 4) {
         s.teams = patch.teams;
         for (const m of this.members.values()) if (m.team >= s.teams) m.team = this.smallestTeam();
       }
@@ -277,8 +357,8 @@ export function createRooms({ profiles }) {
         const p = profiles.get(patch.profile);
         if (p) s.feel = { ...p };
       }
-      this.match?.retune({ feel: s.feel, mode: this.modeData() });
-      this.broadcast(this.view());
+      this.game?.match.retune({ feel: s.feel, mode: this.modeData() });
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
     }
 
     modeData() {
@@ -288,86 +368,130 @@ export function createRooms({ profiles }) {
       return { rate: s.rate, powerups: s.powerups.filter((k) => POWERUP_KINDS.includes(k)) };
     }
 
+    // ---- the game -------------------------------------------------------------------------
+
     start(conn) {
       if (conn.id !== this.host || this.phase === 'playing') return;
       const players = [...this.members.values()].filter((m) => m.conn).slice(0, MAX_PLAYERS);
       if (!players.length) return;
-      this.match = new Match({
+      const match = new Match({
         players: players.map((m) => ({ id: m.id, name: m.name, colour: m.colour, team: m.team })),
         rules: { type: this.settings.type, target: this.settings.target, teamTarget: this.settings.teamTarget },
         feel: this.settings.feel,
         mode: this.modeData(),
         seed: (Math.random() * 2 ** 32) >>> 0,
       });
-      // spectators who left before the game are gone; the rest watch
+      this.game = {
+        match,
+        order: players.map((m) => m.id), // a player's number in the actions
+        tl: null,
+        at: 0, // server time of frame 0
+        log: [], // the round's actions, as relayed
+        deaths: [], // [frame, player]: the server's word on who's out when
+        announced: new Set(),
+        nums: [], // each player's last action number
+        stamps: [], // each player's last action's [frame, sub]
+        countdown: null,
+        timer: null,
+      };
       this.phase = 'playing';
       this.results = null;
-      this.broadcast(this.view());
-      this.startRound();
+      for (const [id, m] of this.members) if (!m.conn) this.members.delete(id);
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
+      this.countdown();
     }
 
     stop(conn) {
-      if (conn.id !== this.host) return;
+      if (conn.id !== this.host || this.phase === 'lobby') return;
+      const counting = !!this.game?.countdown;
       this.halt();
+      this.game = null;
       this.phase = 'lobby';
-      this.match = null;
-      this.round = null;
       this.results = null;
       for (const [id, m] of this.members) if (!m.conn) this.members.delete(id);
-      this.broadcast(this.view());
-    }
-
-    startRound() {
-      if (!this.match) return;
-      this.round = this.match.startRound();
-      this.broadcast(this.round);
-      this.running = true;
-      this.dt = 1000 / this.match.r.rate;
-      this.nextAt = performance.now() + this.dt;
-      this.schedule();
-    }
-
-    schedule() {
-      clearTimeout(this.timer);
-      this.timer = setTimeout(() => this.loop(), Math.max(0, this.nextAt - performance.now()));
-    }
-
-    loop() {
-      if (!this.running || !this.match) return;
-      // catch up after a slow tick, but never more than five at once
-      for (let n = 0; n < 5 && this.running && performance.now() >= this.nextAt - 1; n++) {
-        this.step();
-        this.nextAt += this.dt;
-      }
-      if (performance.now() - this.nextAt > 250) this.nextAt = performance.now() + this.dt;
-      if (this.running) this.schedule();
-    }
-
-    step() {
-      const inputs = new Map();
-      const acks = {};
-      for (const m of this.members.values()) {
-        inputs.set(m.id, { dir: m.input.dir, presses: m.input.presses });
-        if (m.input.seq) acks[m.id] = m.input.seq;
-      }
-      const msg = this.match.tick(inputs);
-      for (const m of this.members.values()) m.input.presses = [];
-      msg.a = acks;
-      this.broadcast(msg);
-      if (msg.e?.some((e) => e.e === 'roundEnd')) {
-        this.halt();
-        if (this.match.over) this.finish();
-        else this.timer = setTimeout(() => this.startRound(), NEXT_ROUND);
-      }
+      if (counting) this.broadcast(DOWN.COUNTDOWN_STOP, {});
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
     }
 
     halt() {
-      this.running = false;
-      clearTimeout(this.timer);
+      if (!this.game) return;
+      clearTimeout(this.game.timer);
+      this.game.timer = null;
+    }
+
+    /** The next round, a moment from now. */
+    countdown() {
+      const g = this.game;
+      const at = clock() + NET.between;
+      g.countdown = { no: g.match.roundNo + 1, at };
+      g.tl = null;
+      this.broadcast(DOWN.COUNTDOWN_START, g.countdown);
+      clearTimeout(g.timer);
+      g.timer = setTimeout(() => this.beginRound(), NET.between);
+    }
+
+    beginRound() {
+      const g = this.game;
+      if (!g) return;
+      const start = g.match.nextRound();
+      g.countdown = null;
+      g.tl = new Timeline(start, { rewind: 1 });
+      g.at = clock() + NET.lead;
+      g.log = [];
+      g.deaths = [];
+      g.announced = new Set();
+      g.nums = g.order.map(() => 0);
+      g.stamps = g.order.map(() => [-1, 0]);
+      this.broadcast(DOWN.ROUND_START, { start, at: g.at });
+      this.schedule();
+    }
+
+    frameMs() {
+      return this.game.tl.round.frameMs;
+    }
+
+    /** The frame the shared clock is in now. */
+    clockFrame() {
+      return Math.floor((clock() - this.game.at) / this.frameMs());
+    }
+
+    schedule() {
+      const g = this.game;
+      clearTimeout(g.timer);
+      const next = g.at + NET.authority + (g.tl.k + 1) * this.frameMs();
+      g.timer = setTimeout(() => this.run(), Math.max(0, next - clock()));
+    }
+
+    /** Simulates up to the clock, NET.authority behind it; announces who's out; ends the round. */
+    run() {
+      const g = this.game;
+      if (!g?.tl) return;
+      const target = Math.floor((clock() - g.at - NET.authority) / this.frameMs());
+      if (target > g.tl.k) g.tl.advanceTo(target);
+      const round = g.tl.round;
+      const out = [];
+      for (const e of g.tl.takeEvents()) {
+        if (e.e !== 'die' || g.announced.has(e.p) || round.playerAlive(e.p)) continue;
+        g.announced.add(e.p);
+        g.deaths.push([e.k, e.p]);
+        out.push([e.k, e.p]);
+      }
+      if (out.length) this.broadcast(DOWN.UPDATE, { deaths: out });
+      if (round.phase === 'done') return this.endRound();
+      this.schedule();
+    }
+
+    endRound() {
+      const g = this.game;
+      g.match.applyRound(g.tl.round.result());
+      this.broadcast(DOWN.UPDATE, { points: g.match.points, teamWins: g.match.teamWins });
+      if (g.match.over) return this.finish();
+      this.countdown();
     }
 
     finish() {
-      const match = this.match;
+      const match = this.game.match;
+      this.halt();
       this.phase = 'results';
       this.results = {
         type: match.rules.type,
@@ -377,30 +501,69 @@ export function createRooms({ profiles }) {
         rounds: match.roundNo,
         target: match.rules.target,
       };
-      this.broadcast({ t: 'over', results: this.results });
-      this.match = null;
-      this.round = null;
-      this.broadcast(this.view());
+      this.game = null;
+      this.broadcast(DOWN.UPDATE, { view: this.view() });
     }
 
-    input(conn, msg) {
-      const m = this.members.get(conn.id);
-      if (!m) return;
-      const seq = Number(msg.s);
-      if (!Number.isInteger(seq) || seq <= m.input.seq) return;
-      m.input.seq = seq;
-      const dir = Number(msg.d);
-      m.input.dir = dir === -1 || dir === 1 ? dir : 0;
-      if (msg.p === -1 || msg.p === 1) m.input.presses.push(msg.p);
+    /** A steering action: taken and relayed to the others, or rejected. */
+    action(conn, payload) {
+      const g = this.game;
+      if (!g || !Array.isArray(payload)) return;
+      const a = toAction(payload);
+      const p = g.order.indexOf(conn.id);
+      if (p < 0 || a.player !== p || !int(a.num) || a.num <= (g.nums[p] ?? 0)) return;
+      const reject = () => {
+        if (g.nums[p] !== undefined) g.nums[p] = a.num;
+        conn.send(DOWN.ACTION_REJECT, [a.round, p, a.num]);
+      };
+      if (!g.tl || a.round !== g.match.roundNo || g.tl.round.phase === 'done') return reject();
+      if (!int(a.frame) || !int(a.sub) || a.sub < 0 || a.sub >= SUBS) return reject();
+      if (![-1, 0, 1].includes(a.dir) || ![-1, 0, 1, undefined, null].includes(a.press)) return reject();
+      const [lf, ls] = g.stamps[p];
+      const late = a.frame < g.tl.k;
+      const early = a.frame > this.clockFrame() + NET.ahead;
+      const backwards = a.frame < lf || (a.frame === lf && a.sub < ls);
+      if (late || early || backwards) return reject();
+      g.nums[p] = a.num;
+      g.stamps[p] = [a.frame, a.sub];
+      const action = { ...a, press: a.press || 0 };
+      g.tl.add(action);
+      const wire = fromAction(action);
+      g.log.push(wire);
+      this.broadcast(DOWN.ACTION_ADD, wire, conn);
+    }
+
+    /** A player gone mid-round: their curve goes straight from the server's next frame. */
+    letGo(id) {
+      const g = this.game;
+      if (!g?.tl) return;
+      const p = g.order.indexOf(id);
+      if (p < 0 || g.tl.lastDir(p) === 0) return;
+      const [lf, ls] = g.stamps[p];
+      const frame = Math.max(g.tl.k, lf);
+      const action = { round: g.match.roundNo, frame, player: p, num: (g.nums[p] ?? 0) + 1, sub: frame === lf ? ls : 0, dir: 0, press: 0 };
+      g.nums[p] = action.num;
+      g.stamps[p] = [frame, action.sub];
+      g.tl.add(action);
+      const wire = fromAction(action);
+      g.log.push(wire);
+      this.broadcast(DOWN.ACTION_ADD, wire);
     }
   }
 
   return {
+    reserve,
+    peek,
     connect,
-    /** Every few seconds: forget rooms that stayed empty. */
+    /** Every few seconds: lapsed reservations, members who never came, rooms left empty. */
     sweep() {
       const now = Date.now();
+      for (const [key, s] of sessions) if (s.until < now) sessions.delete(key);
       for (const [code, room] of rooms) {
+        for (const [id, m] of room.members) {
+          if (!m.conn && !room.playing(id) && now - m.reserved > SESSION_FOR) room.members.delete(id);
+        }
+        if (!room.members.size && !room.emptySince) room.emptySince = now;
         if (room.emptySince && now - room.emptySince > EMPTY_FOR) {
           room.halt();
           rooms.delete(code);

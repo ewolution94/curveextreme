@@ -1,39 +1,35 @@
 // The shared keyboard: two to four players on one computer, the whole game in the page (the same
-// Match as the server's), each seat with its own two keys. Nothing goes over the network, so every
-// curve is "your own": drawn ahead with the keys held right now.
+// Match and rounds as the server's, on the page's own clock), each seat with its own two keys.
+// Nothing goes over the network, so nothing is ever late: each key press goes into the round at the
+// moment it happened, like your own steering online.
 
 import { Match } from '../../shared/engine.mjs';
 import { BUILT_IN } from '../../shared/feel.mjs';
 import { MODES } from '../../shared/modes.mjs';
-import { World } from './world';
+import { RoundRunner, type RoundEvent } from './runner';
 import { Steering, bindKeys } from './input';
-import { prefs } from './prefs.svelte';
 import { sfx } from './sound';
-import type { Pending } from './predict';
 
 export type Seat = { id: string; name: string; colour: string; keys: [string, string] };
 
+const LEAD = 300; // ms from a round's start to its frame 0
+const BETWEEN = 400; // ms between rounds
+
 export class LocalGame {
-  world = new World();
   state = $state({ version: 0, over: false, standings: [] as any[], winner: null as string | null });
-  match: Match;
-  seats: (Seat & { steering: Steering; presses: number[] })[];
-  private raf = 0;
+  runner: RoundRunner | null = null;
+  match: any;
+  seats: Seat[];
+  private steerings: Steering[] = [];
+  private nums: number[];
   private unbind: () => void = () => {};
-  private acc = 0;
-  private last = 0;
-  private paused = false;
+  private timer = 0;
 
   constructor(seats: Seat[], opts: { mode: string; feel?: any; target?: number }) {
     const mode = MODES[opts.mode as keyof typeof MODES] ?? MODES.basic;
     const feel = opts.feel ?? BUILT_IN[mode.feel as keyof typeof BUILT_IN];
-    this.seats = seats.map((s) => {
-      const seat = { ...s, presses: [] as number[], steering: null as unknown as Steering };
-      seat.steering = new Steering((_dir, press) => {
-        if (press) seat.presses.push(press);
-      }, prefs.both);
-      return seat;
-    });
+    this.seats = seats;
+    this.nums = seats.map(() => 0);
     this.match = new Match({
       players: seats.map((s) => ({ id: s.id, name: s.name, colour: s.colour, team: 0 })),
       rules: { type: 'ffa', target: opts.target ?? 0 },
@@ -41,49 +37,50 @@ export class LocalGame {
       mode: { rate: mode.rate, powerups: mode.powerups },
       seed: (Math.random() * 2 ** 32) >>> 0,
     });
-    this.world.onEvent((ev) => {
-      if (ev.e === 'phase' && ev.p === 'draw') sfx.go();
-      if (ev.e === 'phase' && ev.p === 'linger') sfx.round(true);
-      if (ev.e === 'die') sfx.crash(true);
-      if (ev.e === 'pu+') sfx.spawn();
-      if (ev.e === 'pu-') sfx.pick(true);
-      if (['phase', 'score', 'roundEnd', 'round'].includes(ev.e)) this.state.version++;
-    });
+    this.steerings = seats.map(
+      (_, i) =>
+        new Steering((dir, press) => {
+          const r = this.runner;
+          if (!r || r.round.phase === 'done') return;
+          if (!press && r.lastDir(i) === dir) return;
+          r.local(i, dir, press, ++this.nums[i]);
+        }),
+    );
   }
 
   start() {
     const keys = new Map<string, [Steering, number]>();
-    for (const s of this.seats) {
-      keys.set(s.keys[0], [s.steering, -1]);
-      keys.set(s.keys[1], [s.steering, 1]);
-    }
+    this.seats.forEach((s, i) => {
+      keys.set(s.keys[0], [this.steerings[i], -1]);
+      keys.set(s.keys[1], [this.steerings[i], 1]);
+    });
     this.unbind = bindKeys(keys);
-    this.world.round(this.match.startRound());
-    this.last = performance.now();
-    const loop = (now: number) => {
-      this.raf = requestAnimationFrame(loop);
-      if (this.paused) {
-        this.last = now;
-        return;
-      }
-      const dtMs = 1000 / this.world.rate;
-      this.acc += Math.min(250, now - this.last);
-      this.last = now;
-      while (this.acc >= dtMs && !this.paused) {
-        this.acc -= dtMs;
-        this.step(now - this.acc);
-      }
-    };
-    this.raf = requestAnimationFrame(loop);
+    this.nextRound();
   }
 
-  private step(now: number) {
-    const inputs = new Map();
-    for (const s of this.seats) inputs.set(s.id, { dir: s.steering.dir(), presses: s.presses.splice(0) });
-    const msg: any = this.match.tick(inputs);
-    this.world.tick(msg, now);
-    if (!msg.e?.some((e: any) => e.e === 'roundEnd')) return;
-    this.paused = true;
+  private nextRound() {
+    const start = this.match.nextRound();
+    const zero = performance.now() + LEAD;
+    const r = new RoundRunner(start, () => zero, { own: this.seats.map((_, i) => i) });
+    r.on((e) => this.onEvent(e));
+    this.runner = r;
+    this.nums = this.seats.map(() => 0);
+    this.state.version++;
+    // keys held across rounds: those directions from the first frame
+    this.steerings.forEach((s, i) => {
+      if (s.dir()) r.local(i, s.dir(), 0, ++this.nums[i], zero);
+    });
+  }
+
+  private onEvent(e: RoundEvent) {
+    if (e.e === 'phase' && e.p === 'draw') sfx.go();
+    if (e.e === 'phase' && e.p === 'linger') sfx.round(true);
+    if (e.e === 'die') sfx.crash(true);
+    if (e.e === 'pu+') sfx.spawn();
+    if (e.e === 'pu-') sfx.pick(true);
+    if (['phase', 'score', 'done', 'die'].includes(e.e)) this.state.version++;
+    if (e.e !== 'done' || !this.runner) return;
+    this.match.applyRound(this.runner.round.result());
     if (this.match.over) {
       this.state.over = true;
       this.state.standings = this.match.standings();
@@ -91,21 +88,12 @@ export class LocalGame {
       sfx.match(true);
       return;
     }
-    setTimeout(() => {
-      this.world.round(this.match.startRound());
-      this.acc = 0;
-      this.paused = false;
-    }, 400);
-  }
-
-  /** Every seat is steered here: drawn ahead with the keys held now. */
-  inputFor(pid: string): { dir0: number; pending: Pending[] } {
-    const seat = this.seats.find((s) => s.id === pid);
-    return { dir0: seat?.steering.dir() ?? 0, pending: [] };
+    this.timer = window.setTimeout(() => this.nextRound(), BETWEEN);
   }
 
   stop() {
-    cancelAnimationFrame(this.raf);
+    clearTimeout(this.timer);
     this.unbind();
+    this.runner = null;
   }
 }

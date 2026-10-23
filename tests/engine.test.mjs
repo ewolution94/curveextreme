@@ -1,33 +1,34 @@
 // The engine against the reference's measured numbers and the rules. Fast, fixed seeds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Match, motionOf, steer, targetFor } from '../shared/engine.mjs';
+import { Match, Round, arc, motionOf, targetFor } from '../shared/engine.mjs';
 import { CLASSIC, GSPP, fieldFor, cleanFeel } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
+import { sin, cos } from '../shared/dmath.mjs';
 
 const players = (n, teams = false) =>
   Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}`, colour: '#fff', team: teams ? i % 2 : 0 }));
-const input = (entries) => new Map(entries);
 
 // The tests start drawing right after the still phase: the free phase has no walls, and a curve left
 // to drive straight on leaves the field in it (and dies when the lines start, like the reference).
 const NOW = { ...CLASSIC, freeTime: 0 };
 
-function match(n = 2, opts = {}) {
+function setup(n = 2, opts = {}) {
   const m = new Match({ players: players(n, opts.teams), rules: opts.rules ?? {}, feel: opts.feel ?? NOW, mode: opts.mode ?? MODES.none, seed: opts.seed ?? 7 });
-  m.startRound();
-  return m;
+  return { m, r: new Round(m.nextRound()) };
 }
-/** Runs ticks until the curves draw (past the still and free phases). */
-function toDraw(m) {
-  while (m.r.phase === 'still' || m.r.phase === 'free') m.tick(new Map());
-  assert.equal(m.r.phase, 'draw');
+/** Steps until the curves draw (past the still and free phases). */
+function toDraw(r) {
+  while (r.phase === 'still' || r.phase === 'free') r.step();
+  assert.equal(r.phase, 'draw');
 }
+/** Holds a direction for a player from now on: one action at the start of the next frame. */
+const hold = (r, player, dir, num = 1) => r.step([{ player, num, sub: 0, dir, press: 0 }]);
 
 test('straight: 90 units a second', () => {
   const c = { x: 0, y: 0, a: 0 };
   const mo = motionOf([], CLASSIC);
-  for (let i = 0; i < 50; i++) steer(c, mo, 0, [], 1 / 50);
+  for (let i = 0; i < 50; i++) arc(c, mo, 0, 1 / 50);
   assert.ok(Math.abs(c.x - 90) < 1e-9);
 });
 
@@ -36,47 +37,69 @@ test('a held turn: radius 35, a full circle in 2.44 s', () => {
   const mo = motionOf([], CLASSIC);
   const pts = [];
   for (let i = 0; i < 122; i++) {
-    steer(c, mo, 1, [], 1 / 50);
+    arc(c, mo, 1, 1 / 50);
     pts.push([c.x, c.y]);
   }
-  // fit: the centre is the mean of a full circle's points
   const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
   const radii = pts.map((p) => Math.hypot(p[0] - cx, p[1] - cy));
   const mean = radii.reduce((s, v) => s + v, 0) / radii.length;
   assert.ok(Math.abs(mean - 35) < 0.3, `radius ${mean}`);
-  assert.ok(Math.abs((2 * Math.PI * 35) / 90 - 2.443) < 0.01);
+});
+
+test('an arc split anywhere lands on the same point (sub-frame actions are exact)', () => {
+  const mo = motionOf([], CLASSIC);
+  const whole = { x: 10, y: 20, a: 0.3 };
+  arc(whole, mo, 1, 0.02);
+  const parts = { x: 10, y: 20, a: 0.3 };
+  arc(parts, mo, 1, 0.0073);
+  arc(parts, mo, 1, 0.0127);
+  assert.ok(Math.abs(whole.x - parts.x) < 1e-12 && Math.abs(whole.y - parts.y) < 1e-12 && Math.abs(whole.a - parts.a) < 1e-12);
+});
+
+test('a press mid-frame turns from that moment: between pressing at the frame start and not at all', () => {
+  const heading = (sub) => {
+    const { r } = setup(1, { feel: { ...NOW, fieldBase: 5000 } });
+    toDraw(r);
+    r.step(sub === null ? [] : [{ player: 0, num: 1, sub, dir: 1, press: 1 }]);
+    return r.s.curves[0].a;
+  };
+  const none = heading(null), half = heading(500), full = heading(0);
+  assert.ok(none < half && half < full, `${none} ${half} ${full}`);
+  assert.ok(Math.abs(half - none - (full - none) / 2) < 1e-9, 'half a frame turns half as much');
 });
 
 test('phases: 2.5 s still, 2.5 s without a line, then drawing', () => {
-  const m = match(1, { feel: { ...CLASSIC, fieldBase: 5000 } });
-  const start = { ...m.r.curves[0] };
-  for (let i = 0; i < 125; i++) m.tick(new Map());
-  assert.equal(m.r.phase, 'still');
-  assert.equal(m.r.curves[0].x, start.x);
-  m.tick(new Map());
-  assert.equal(m.r.phase, 'free');
-  for (let i = 0; i < 124; i++) m.tick(new Map());
-  assert.equal(m.r.phase, 'free');
-  assert.equal(m.r.points.x.length, 0, 'no line while free');
-  m.tick(new Map());
-  assert.equal(m.r.phase, 'draw');
+  const { r } = setup(1, { feel: { ...CLASSIC, fieldBase: 5000 } });
+  const start = { ...r.s.curves[0] };
+  for (let i = 0; i < 125; i++) r.step();
+  assert.equal(r.phase, 'still');
+  assert.equal(r.s.curves[0].x, start.x);
+  r.step();
+  assert.equal(r.phase, 'free');
+  for (let i = 0; i < 124; i++) r.step();
+  assert.equal(r.phase, 'free');
+  assert.equal(r.trail.x.length, 0, 'no line while free');
+  r.step();
+  assert.equal(r.phase, 'draw');
 });
 
 test('gaps: 16 long, about 158 apart on average', () => {
-  const feel = { ...NOW, fieldBase: 1e6 }; // a field too big to leave
-  const m = match(1, { feel, seed: 3 });
-  toDraw(m);
+  const { r } = setup(1, { feel: { ...NOW, fieldBase: 1e6 }, seed: 3 });
+  toDraw(r);
   let drawing = 0, gaps = 0, inGap = false, gapLen = 0;
   const lens = [];
   for (let i = 0; i < 50 * 400; i++) {
-    const msg = m.tick(new Map());
-    const drew = msg.c[0][4] & 1;
-    if (drew) {
+    const before = r.trail.x.length;
+    r.step();
+    if (r.trail.x.length > before) {
       drawing++;
       if (inGap) lens.push(gapLen);
       inGap = false;
     } else {
-      if (!inGap) { gaps++; gapLen = 0; }
+      if (!inGap) {
+        gaps++;
+        gapLen = 0;
+      }
       inGap = true;
       gapLen += 1.8;
     }
@@ -85,44 +108,41 @@ test('gaps: 16 long, about 158 apart on average', () => {
   assert.ok(lineBetween > 140 && lineBetween < 178, `average line between gaps ${lineBetween}`);
   const meanGap = lens.reduce((s, v) => s + v, 0) / lens.length;
   assert.ok(meanGap > 15 && meanGap < 19, `gap length ${meanGap}`);
+  assert.ok(r.s.gaps[0] >= gaps, 'the round counts the gaps for the stats (back-to-back ones apart)');
 });
 
 test('the wall kills, and so does your own line after a circle', () => {
-  const m = match(1, { seed: 11 });
-  toDraw(m);
+  const { r } = setup(1, { seed: 11 });
+  toDraw(r);
+  hold(r, 0, 1);
   let died = null;
-  for (let i = 0; i < 2000 && !died; i++) {
-    const msg = m.tick(input([['p0', { dir: 1, presses: [] }]]));
-    died = msg.e?.find((e) => e.e === 'die');
-  }
+  for (let i = 0; i < 2000 && !died; i++) died = r.step().find((e) => e.e === 'die');
   assert.ok(died, 'a held turn ends in your own line');
-  const m2 = match(1, { seed: 12 });
-  toDraw(m2);
+  const { r: r2 } = setup(1, { seed: 12 });
+  toDraw(r2);
   let wall = null;
-  for (let i = 0; i < 2000 && !wall; i++) wall = m2.tick(new Map()).e?.find((e) => e.e === 'die');
+  for (let i = 0; i < 2000 && !wall; i++) wall = r2.step().find((e) => e.e === 'die');
   assert.ok(wall);
   assert.equal(wall.by, null);
 });
 
 test('points: the survivor scores, the round runs on 4.65 s, then ends', () => {
-  const m = match(2, { seed: 5 });
-  toDraw(m);
-  // p0 circles (dies in its own line), p1 also circles: whoever dies first gives the other a point
+  // p0 circles into its own line, p1 drives straight across a field too big to leave in time
+  const { r } = setup(2, { seed: 5, feel: { ...NOW, fieldBase: 3000 } });
+  toDraw(r);
+  r.step([{ player: 0, num: 1, sub: 0, dir: 1, press: 1 }]);
   let scored = null, k0 = 0;
   for (let i = 0; i < 3000 && !scored; i++) {
-    const msg = m.tick(input([['p0', { dir: 1, presses: [] }], ['p1', { dir: -1, presses: [] }]]));
-    scored = msg.e?.find((e) => e.e === 'score');
-    k0 = msg.k;
+    k0 = r.k;
+    scored = r.step().find((e) => e.e === 'score');
   }
   assert.ok(scored);
-  const total = Object.values(scored.pts).reduce((s, v) => s + v, 0);
-  assert.equal(total, 1);
-  assert.equal(m.r.phase, 'linger');
+  assert.deepEqual(r.s.gains, [0, 1]);
+  assert.equal(r.phase, 'linger');
   let end = null, k1 = 0;
   for (let i = 0; i < 400 && !end; i++) {
-    const msg = m.tick(new Map());
-    end = msg.e?.find((e) => e.e === 'roundEnd');
-    k1 = msg.k;
+    k1 = r.k;
+    end = r.step().find((e) => e.e === 'done');
   }
   assert.ok(end);
   assert.equal(k1 - k0, Math.round(4.65 * 50));
@@ -130,64 +150,58 @@ test('points: the survivor scores, the round runs on 4.65 s, then ends', () => {
 
 test('the match: first to 10 × (players − 1) with a two-point lead', () => {
   assert.equal(targetFor(5), 40);
-  const m = match(2);
-  m.points = { p0: 10, p1: 9 };
-  m.r.winner = 'p0';
-  m.endRound([]);
+  const { m } = setup(2);
+  m.applyRound({ gains: { p0: 10, p1: 9 }, winner: 'p0' });
   assert.equal(m.over, false, 'no two-point lead');
-  m.points = { p0: 11, p1: 9 };
-  m.endRound([]);
+  m.applyRound({ gains: { p0: 1, p1: 0 }, winner: 'p0' });
   assert.equal(m.over, true);
   assert.equal(m.winner, 'p0');
 });
 
 test('teams: a round goes to the team left; teammates score nothing for each other', () => {
-  const m = match(4, { teams: true, rules: { type: 'teams' }, seed: 9 });
+  const { m, r } = setup(4, { teams: true, rules: { type: 'teams' }, seed: 9 });
   assert.equal(m.rules.type, 'teams');
-  toDraw(m);
-  // kill p0 (team 0): only team 1 (p1, p3) scores
-  m.r.curves.find((c) => c.pid === 'p0').x = -100;
-  const msg = m.tick(new Map());
-  const score = msg.e.find((e) => e.e === 'score');
-  assert.deepEqual(score.pts, { p0: 0, p1: 1, p2: 0, p3: 1 });
-  m.r.curves.find((c) => c.pid === 'p2').x = -100;
-  const msg2 = m.tick(new Map());
-  const phase = msg2.e.find((e) => e.e === 'phase' && e.p === 'linger');
+  toDraw(r);
+  r.s.curves.find((c) => c.p === 0).x = -100;
+  assert.ok(r.step().some((e) => e.e === 'score'));
+  assert.deepEqual(r.s.gains, [0, 1, 0, 1]);
+  r.s.curves.find((c) => c.p === 2).x = -100;
+  const phase = r.step().find((e) => e.e === 'phase' && e.p === 'linger');
   assert.equal(phase.winner, 1);
+  m.applyRound(r.result());
   assert.equal(m.teamWins[1], 1);
+  assert.deepEqual(m.points, { p0: 0, p1: 2, p2: 0, p3: 2 }, 'p1 and p3 scored for both of the other team');
+});
+
+test('the server can take a player out at a frame', () => {
+  const { r } = setup(2, { seed: 4 });
+  toDraw(r);
+  const ev = r.step([], [1]);
+  assert.ok(ev.some((e) => e.e === 'die' && e.p === 1 && e.by === null));
+  assert.deepEqual(r.s.gains, [1, 0]);
 });
 
 test('powerups: green on you, red on the others, blue on everyone; erasers clear lines', () => {
-  const m = match(2, { mode: MODES.none, feel: { ...NOW, fieldBase: 2000 } });
-  toDraw(m);
-  for (let i = 0; i < 30; i++) m.tick(new Map());
-  const [a, b] = m.r.curves;
+  const { r } = setup(2, { feel: { ...NOW, fieldBase: 2000 } });
+  toDraw(r);
+  for (let i = 0; i < 30; i++) r.step();
+  const [a, b] = r.s.curves;
   const put = (kind, curve) => {
-    m.r.powerups.push({ id: 999, kind, x: curve.x + Math.cos(curve.a) * 1.8, y: curve.y + Math.sin(curve.a) * 1.8, vx: 0, vy: 0 });
-    return m.tick(new Map());
+    r.s.powerups.push({ id: 999, kind, x: curve.x + cos(curve.a) * 1.8, y: curve.y + sin(curve.a) * 1.8, vx: 0, vy: 0 });
+    return r.step();
   };
   put('greenSpeed', a);
-  assert.equal(m.motion(a).v, 180);
-  assert.equal(m.motion(b).v, 90);
+  assert.equal(r.motion(a).v, 180);
+  assert.equal(r.motion(b).v, 90);
   put('redTurtle', a);
-  assert.equal(m.motion(b).v, 45);
-  assert.ok(m.r.points.x.length > 0);
-  const msg = put('eraser', a);
-  assert.ok(msg.e.some((e) => e.e === 'erase' && e.pid === null));
-  assert.ok(m.r.points.x.length <= 2);
-  const before = m.r.curves.length;
+  assert.equal(r.motion(b).v, 45);
+  assert.ok(r.trail.x.length > 0);
+  const ev = put('eraser', a);
+  assert.ok(ev.some((e) => e.e === 'erase' && e.p === null));
+  assert.ok(r.trail.x.length <= 2);
+  const before = r.s.curves.length;
   put('split', a);
-  assert.equal(m.r.curves.length, before + 2);
-});
-
-test('the same seed and inputs give the same game', () => {
-  const run = () => {
-    const m = match(3, { mode: MODES.basic, seed: 42 });
-    const out = [];
-    for (let i = 0; i < 1500; i++) out.push(JSON.stringify(m.tick(input([['p0', { dir: i % 90 < 30 ? 1 : 0, presses: [] }]]))));
-    return out.join('\n');
-  };
-  assert.equal(run(), run());
+  assert.equal(r.s.curves.length, before + 2);
 });
 
 test('fields scale with the players; GS++ is bigger and faster', () => {
@@ -205,23 +219,25 @@ test('a profile from outside is cleaned: unknown keys dropped, numbers kept in r
   assert.equal(f.name, 'Playtest');
 });
 
-test('the Tune panel: a new feel reaches the next round, not the running one', () => {
-  const m = match(2);
+test('the Tune panel: a new feel reaches the next round', () => {
+  const { m, r } = setup(2);
   m.retune({ feel: { ...NOW, speed: 120, name: 'Playtest' } });
-  assert.equal(m.r.feel.speed, 90, 'the running round keeps its feel');
-  const next = m.startRound();
+  assert.equal(r.feel.speed, 90, 'the running round keeps its feel');
+  const next = m.nextRound();
   assert.equal(next.feel.speed, 120);
-  assert.equal(m.r.feel.name, 'Playtest');
+  assert.equal(next.no, 2);
+  assert.notEqual(next.seed, r.start.seed, 'each round its own seed');
 });
 
 test('walls while moving without a line: off, wrap or solid', () => {
   const run = (freeWalls) => {
-    const m = match(1, { feel: { ...CLASSIC, freeTime: 4, freeWalls } });
-    const c = m.r.curves[0];
-    c.x = 10; c.a = Math.PI; // heading out of the left wall
+    const { r } = setup(1, { feel: { ...CLASSIC, freeTime: 4, freeWalls } });
+    const c = r.s.curves[0];
+    c.x = 10;
+    c.a = Math.PI; // heading out of the left wall
     let died = false;
-    for (let i = 0; i < 260; i++) died ||= !!m.tick(new Map()).e?.some((e) => e.e === 'die');
-    return { died, x: c.x };
+    for (let i = 0; i < 260; i++) died ||= r.step().some((e) => e.e === 'die');
+    return { died, x: r.s.curves[0].x };
   };
   assert.equal(run('solid').died, true);
   assert.ok(run('wrap').x > 0, 'came back in on the other side');

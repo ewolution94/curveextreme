@@ -4,8 +4,7 @@
   // the field; on a phone held sideways the board left, the field in the middle, the name and the
   // room right.
   import { onMount, type Snippet } from 'svelte';
-  import type { World } from '../lib/world';
-  import type { Pending } from '../lib/predict';
+  import type { RoundRunner } from '../lib/runner';
   import { prefs } from '../lib/prefs.svelte';
   import { POWERUPS } from '../../shared/powerups.mjs';
   import { DISC } from '../lib/icons';
@@ -16,15 +15,11 @@
 
   type Player = { id: string; name: string; colour: string; team: number; avatar?: number[] | null };
   type Props = {
-    world: World;
+    runner: RoundRunner;
     version: number;
+    /** The round's players, in its order (a player's number is their place here). */
     players: Player[];
     me: string | null;
-    own: Set<string>;
-    aheadMs: () => number;
-    behindTicks: number;
-    inputFor: (pid: string) => { dir0: number; pending: Pending[] };
-    colourOf: (pid: string) => string;
     code?: string;
     keys?: string; // who steers with which keys, under the board
     banner?: { big: string; small: string } | null;
@@ -32,7 +27,8 @@
     children?: Snippet;
     area?: HTMLDivElement;
   };
-  let { world, version, players, me, own, aheadMs, behindTicks, inputFor, colourOf, code, keys, banner, actions, children, area = $bindable() }: Props = $props();
+  let { runner, version, players, me, code, keys, banner, actions, children, area = $bindable() }: Props = $props();
+  const colourOf = (p: number) => players[p]?.colour ?? '#888';
 
   const BOARD = 288, GAP = 32, PHONE_BOARD = 186, PHONE_SIDE = 128, PHONE_GAP = 16;
   let compact = $state(false);
@@ -40,7 +36,12 @@
   let fieldH = $state(0);
   const no = $derived.by(() => {
     void version;
-    return world.no;
+    return runner.no;
+  });
+
+  const phase = $derived.by(() => {
+    void version;
+    return runner.round.phase as string;
   });
 
   // your running effects under the board: a disc's colour and the time left
@@ -51,12 +52,12 @@
     set();
     mq.addEventListener('change', set);
     const timer = setInterval(() => {
-      const mine = [...world.curves.values()].find((c) => c.alive && me && c.pid === me);
-      const live = world.liveTick(performance.now());
-      fx = (mine?.m.fx ?? [])
-        .map(([kind, until]) => {
-          const p = (POWERUPS as any)[kind];
-          return { kind, name: p?.name ?? kind, left: Math.max(0, (until - live) / world.rate), colour: DISC[p?.colour ?? 'blue'] };
+      const p = me ? runner.playerOf(me) : -1;
+      const T = runner.frameAt(performance.now());
+      fx = (p >= 0 ? runner.effectsOf(p, T) : [])
+        .map(({ kind, left }) => {
+          const pu = (POWERUPS as any)[kind];
+          return { kind, name: pu?.name ?? kind, left, colour: DISC[pu?.colour ?? 'blue'] };
         })
         .filter((f) => f.left > 0);
     }, 250);
@@ -80,7 +81,7 @@
   {/if}
   <div class="group">
     <div class="boardwrap" style:height={fieldH ? `${fieldH}px` : null}>
-    <Scoreboard {world} {players} {me} {version}>
+    <Scoreboard {runner} {players} {me} {version}>
       {#if !compact}
         <div class="foot">
           {#each fx as f (f.kind)}
@@ -91,15 +92,15 @@
       {/if}
     </Scoreboard>
     </div>
-    <Field {world} {own} predict={prefs.motion === 'predict'} {aheadMs} {behindTicks} {inputFor} {colourOf} size={prefs.fieldSize}
+    <Field {runner} {colourOf} size={prefs.fieldSize}
       reserve={compact ? PHONE_BOARD + PHONE_SIDE + 2 * PHONE_GAP : BOARD + GAP} bind:width={fieldW} bind:height={fieldH}>
       {#if banner}
-        <div class="banner" class:fade={world.phase === 'free'}>
+        <div class="banner" class:fade={phase === 'free'}>
           <b>{banner.big}</b>
           {#if banner.small}<small>{banner.small}</small>{/if}
         </div>
       {/if}
-      {#if compact && world.phase === 'still'}
+      {#if compact && phase === 'still'}
         <div class="halves"><span>◀ {t('Hold left')}</span><span>{t('Hold right')} ▶</span></div>
       {/if}
     </Field>

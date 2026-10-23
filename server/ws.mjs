@@ -1,6 +1,7 @@
 // A small WebSocket server (RFC 6455), so the game server keeps the family's no-dependency rule:
-// the upgrade handshake, masked frames from the page, text messages (fragmented ones too), ping
-// and pong, close. Messages are JSON text; frames over 1 MB close the connection.
+// the upgrade handshake, masked frames from the page, binary and text messages (fragmented ones
+// too), ping and pong, close. The game speaks binary (shared/wire.mjs); frames over 1 MB close the
+// connection.
 
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -78,15 +79,17 @@ export class WebSocketConnection extends EventEmitter {
     if (op === 0x8) return this.close(1000);
     if (op === 0x9) return this.write(0xa, payload);
     if (op === 0xa) return;
-    if (op === 0x1 || op === 0x2) this.fragments = [payload];
-    else if (op === 0x0 && this.fragments) this.fragments.push(payload);
+    if (op === 0x1 || op === 0x2) {
+      this.fragments = [payload];
+      this.binary = op === 0x2;
+    } else if (op === 0x0 && this.fragments) this.fragments.push(payload);
     else return;
     const size = this.fragments.reduce((s, b) => s + b.length, 0);
     if (size > MAX_MESSAGE) return this.close(1009);
     if (!fin) return;
-    const message = Buffer.concat(this.fragments).toString('utf8');
+    const data = Buffer.concat(this.fragments);
     this.fragments = null;
-    this.emit('message', message);
+    this.emit('message', this.binary ? data : data.toString('utf8'), this.binary);
   }
 
   write(op, data) {
@@ -113,9 +116,14 @@ export class WebSocketConnection extends EventEmitter {
     this.socket.write(Buffer.concat([header, data]));
   }
 
-  /** Sends a text message (a string, usually JSON). */
+  /** Sends a text message. */
   send(text) {
     this.write(0x1, Buffer.from(text, 'utf8'));
+  }
+
+  /** Sends a binary message (a Uint8Array or Buffer). */
+  sendBinary(bytes) {
+    this.write(0x2, Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
   }
 
   ping() {
