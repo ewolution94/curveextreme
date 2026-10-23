@@ -21,7 +21,7 @@
 <dialog class="sheet" bind:this={dialog} onclose={() => (open = false)}>
   <div class="body">
     <h2>{t('Settings')}</h2>
-    {@render choice(t('Field size'), 'fieldSize', [['auto', t('Auto')], ['reference', t('Like the original')], ['fill', t('Fill the screen')]])}
+    {@render choice(t('Field size'), 'fieldSize', [['fill', t('Fill the screen')], ['reference', t('Like the original')], ['auto', t('Auto')]])}
     {@render choice(t('Your curve'), 'motion', [['predict', t('Instant (drawn ahead)')], ['server', t('From the server')]])}
     {@render choice(t('Others drawn behind'), 'behind', [[0, t('{n} ticks', { n: 0 })], [1, t('{n} ticks', { n: 1 })], [2, t('{n} ticks', { n: 2 })], [3, t('{n} ticks', { n: 3 })]])}
     {@render choice(t('Both keys held'), 'both', [['last', t('Last pressed wins')], ['straight', t('Drive straight')]])}
