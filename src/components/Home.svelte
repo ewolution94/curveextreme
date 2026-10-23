@@ -1,165 +1,232 @@
+<!--
+  The start, the family's way (Würfle's Home.svelte): who you are (a seal, your name and your curve's
+  colour), then a room for friends (new, or by its code), the shared keyboard, your level, how to play.
+  How to play opens once on a device's first visit. On a computer two columns: you on the left, the
+  ways to play on the right.
+-->
 <script lang="ts">
-  // Home: your name and colour, a new room or one with a code, the shared keyboard; your level.
-  import { online, createRoom, joinRoom, updateMe } from '../lib/online.svelte';
-  import { identity } from '../lib/store';
-  import { progress, levelOf } from '../lib/progress';
+  import { firstVisit } from '../../vendor/ewo/elements/guide.js';
+  import type { Avatar } from '../lib/avatar';
   import { t } from '../lib/i18n.svelte';
+  import { createRoom, updateMe } from '../lib/online.svelte';
+  import { levelOf, progress } from '../lib/progress';
+  import { identity } from '../lib/store';
+  import { ui } from '../lib/ui.svelte';
+  import { waitAt } from '../lib/waits';
+  import AvatarMaker from './AvatarMaker.svelte';
   import ColourPicker from './ColourPicker.svelte';
-  import SettingsSheet from './SettingsSheet.svelte';
+  import GuideRow from './GuideRow.svelte';
   import StatsSheet from './StatsSheet.svelte';
-  import Wordmark from './Wordmark.svelte';
 
-  let { onLocal }: { onLocal: () => void } = $props();
+  let { onjoin, onlocal }: { onjoin: (code: string) => void; onlocal: () => void } = $props();
+
+  // A device's first visit opens how to play, once (Folio's firstVisit: never again, and never when
+  // storage is unavailable).
+  $effect(() => {
+    if (firstVisit('curveextreme:guide')) ui.guide = true;
+  });
+
   const me = identity();
   let name = $state(me.name);
+  let avatar: Avatar = $state(me.avatar);
   let colour = $state(me.colour || '#ffe53b');
   let code = $state('');
-  let settingsOpen = $state(false);
+  let error = $state('');
   let statsOpen = $state(false);
   const prog = progress();
   const lv = levelOf(prog.xp);
+  const CODE = /^[A-Z]{4}$/;
 
-  function rename() {
-    updateMe({ name: name.trim() });
+  function changeAvatar(next: Avatar) {
+    avatar = next;
+    updateMe({ avatar: next });
   }
   function pick(hex: string) {
     colour = hex;
     updateMe({ colour: hex });
   }
-  const errors: Record<string, string> = { 'no-room': 'No room with that code.', full: 'The room is full.' };
+  function who() {
+    if (!name.trim()) {
+      error = t('Your name first, please.');
+      return false;
+    }
+    error = '';
+    updateMe({ name: name.trim() });
+    return true;
+  }
+
+  async function create(event: Event) {
+    if (!who()) return;
+    try {
+      await waitAt(event, (signal) => createRoom(signal), t('Opening a room …'));
+    } catch {
+      error = t('That didn’t work. Try again.');
+    }
+  }
+
+  function join(event: SubmitEvent) {
+    event.preventDefault();
+    if (CODE.test(code) && who()) onjoin(code);
+  }
 </script>
 
-<main class="home">
-  <header>
-    <Wordmark />
-    <p class="tag">{t('Steer a line that never stops. Slip through its gaps, outlast everyone.')}</p>
-  </header>
-
-  <section class="panel me">
-    <label class="label" for="name">{t('Your name')}</label>
-    <input id="name" class="field-input" maxlength="20" autocomplete="nickname" bind:value={name} onchange={rename} placeholder="Player" />
-    <span class="label">{t('Your colour')}</span>
-    <ColourPicker value={colour} xp={prog.xp} onPick={pick} />
+<div class="home">
+  <section class="sheet card you">
+    <h1 class="display">{t('Who’s driving?')}</h1>
+    <AvatarMaker {avatar} onchange={changeAvatar} />
+    <label class="field">
+      <span class="label">{t('Your name')}</span>
+      <input class="input" bind:value={name} onchange={() => name.trim() && updateMe({ name: name.trim() })} maxlength="20" autocomplete="nickname" placeholder={t('Name')} />
+    </label>
+    <div class="field">
+      <span class="label">{t('Your colour')}</span>
+      <ColourPicker value={colour} xp={prog.xp} onPick={pick} />
+    </div>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
   </section>
 
-  <section class="actions">
-    <button class="btn primary big" type="button" onclick={() => { rename(); createRoom(); }} disabled={!online.open}>{t('New room')}</button>
-    <form class="join" onsubmit={(e) => { e.preventDefault(); rename(); joinRoom(code); }}>
-      <input class="field-input code" aria-label={t('Room code')} placeholder={t('Room code')} maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false"
-        bind:value={code} oninput={() => (code = code.toUpperCase().replace(/[^A-Z]/g, ''))} />
-      <button class="btn" type="submit" disabled={code.length !== 4 || !online.open}>{t('Join')}</button>
-    </form>
-    {#if online.error && errors[online.error]}<p class="error">{t(errors[online.error])}</p>{/if}
-    {#if !online.open}<p class="muted">{t('Connecting…')}</p>{/if}
-    <button class="btn ghost" type="button" onclick={onLocal}>
-      {t('Shared keyboard')} <span class="muted small">{t('Two to four players on this computer.')}</span>
-    </button>
-  </section>
+  <div class="ways">
+    <section class="sheet card">
+      <h2 class="display">{t('Play together')}</h2>
+      <p class="hint">{t('A room with a code: everyone on their own computer or phone, up to ten curves.')}</p>
+      <button class="btn primary block" type="button" onclick={create}>{t('New room')}</button>
+      <form class="joinform" onsubmit={join}>
+        <span class="label">{t('Join with a room code')}</span>
+        <div class="row">
+          <input
+            class="input code"
+            bind:value={code}
+            oninput={() => (code = code.toUpperCase().replace(/[^A-Z]/g, ''))}
+            maxlength="4"
+            autocapitalize="characters"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="CODE"
+            aria-label={t('Room code')}
+          />
+          <button class="btn" type="submit" disabled={!CODE.test(code)}>{t('Join')}</button>
+        </div>
+      </form>
+    </section>
 
-  <footer class="foot">
-    <button class="level" type="button" onclick={() => (statsOpen = true)}>
-      <span class="lv">{t('Level {n}', { n: lv.level })}</span>
-      <span class="bar"><span style:width="{((prog.xp - lv.from) / (lv.to - lv.from)) * 100}%"></span></span>
-      <span class="muted small num">{t('{n} XP to level {next}', { n: lv.to - prog.xp, next: lv.level + 1 })}</span>
-    </button>
-    <button class="btn small ghost" type="button" onclick={() => (settingsOpen = true)}>{t('Settings')}</button>
-  </footer>
-</main>
+    <section class="sheet card">
+      <h2 class="display">{t('One keyboard')}</h2>
+      <p class="hint">{t('Two to four players on this computer, two keys each.')}</p>
+      <button class="btn block" type="button" onclick={onlocal}>{t('Set up the seats')}</button>
+    </section>
 
-<SettingsSheet bind:open={settingsOpen} />
+    <button class="sheet level" type="button" onclick={() => (statsOpen = true)}>
+      <span class="lv display">{t('Level {n}', { n: lv.level })}</span>
+      <span class="meter"><span style:width="{((prog.xp - lv.from) / (lv.to - lv.from)) * 100}%"></span></span>
+      <small class="num">{t('{n} XP to level {next}', { n: lv.to - prog.xp, next: lv.level + 1 })} · {t('Your stats')}</small>
+      <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+    </button>
+
+    <GuideRow />
+  </div>
+</div>
+
 <StatsSheet bind:open={statsOpen} />
 
 <style>
   .home {
-    min-height: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 22px;
-    max-width: 520px;
-    margin: 0 auto;
-    padding: max(32px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    display: grid;
+    gap: 18px;
+    max-width: 440px;
+    margin: 18px auto 0;
   }
-  header {
+  .ways {
     display: flex;
     flex-direction: column;
+    gap: 18px;
+  }
+  @media (min-width: 900px) {
+    .home {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+      max-width: 920px;
+      gap: 22px;
+      margin-top: 28px;
+    }
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 22px 20px 20px;
+  }
+  h1 {
+    font-size: 28px;
+    line-height: 1.1;
+    text-align: center;
+  }
+  h2 {
+    font-size: 21px;
+    line-height: 1.1;
+  }
+  .field,
+  .joinform {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .row {
+    display: flex;
     gap: 10px;
-  }
-  .tag {
-    margin: 0;
-    color: var(--muted);
-    max-width: 38ch;
-  }
-  .me {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-  }
-  .actions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .big {
-    min-height: 54px;
-    font-size: 17px;
-  }
-  .join {
-    display: flex;
-    gap: 8px;
   }
   .code {
     flex: 1;
     min-width: 0;
-    font: 800 18px var(--display);
+    font: 800 22px/1.2 var(--display);
+    font-stretch: 125%;
     letter-spacing: 0.3em;
     text-transform: uppercase;
   }
-  .ghost {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-  .muted {
-    color: var(--muted);
-  }
-  .small {
-    font-size: 12.5px;
-    font-weight: 400;
-  }
-  .error {
-    margin: 0;
-    color: var(--danger);
-  }
-  .foot {
-    margin-top: auto;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-  }
   .level {
-    flex: 1;
-    min-width: 0;
     display: grid;
-    gap: 4px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 14px;
+    align-items: center;
+    width: 100%;
+    padding: 14px 14px 14px 16px;
     text-align: left;
-    border: 0;
-    background: none;
-    padding: 0;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (hover: hover) {
+    .level:hover {
+      border-color: rgb(255 255 255 / 0.3);
+    }
   }
   .lv {
-    font: 800 14px var(--display);
+    font-size: 18px;
   }
-  .bar {
+  .meter {
+    grid-column: 1;
     height: 6px;
     border-radius: 3px;
     background: var(--panel-2);
     overflow: hidden;
   }
-  .bar span {
+  .meter span {
     display: block;
     height: 100%;
     background: var(--accent);
+  }
+  .level small {
+    grid-column: 1;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .chev {
+    grid-column: 2;
+    grid-row: 1 / 4;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>

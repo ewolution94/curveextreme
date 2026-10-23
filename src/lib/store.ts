@@ -1,3 +1,5 @@
+import { isAvatar, randomAvatar, type Avatar } from './avatar';
+
 // localStorage that never throws (a private window, blocked storage): reads fall back, writes are
 // best effort. Everything CurveExtreme keeps lives on the device.
 
@@ -24,18 +26,49 @@ export function save(key: string, value: unknown) {
 
 const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-/** This device's player: an id and a secret for the server, a name and a colour. */
-export function identity(): { id: string; secret: string; name: string; colour: string } {
-  const me = load('cx-me', { id: '', secret: '', name: '', colour: '' });
+/** This device's player: an id and a secret for the server, a name, a colour and an avatar. */
+export function identity(): { id: string; secret: string; name: string; colour: string; avatar: Avatar } {
+  const me = load<{ id: string; secret: string; name: string; colour: string; avatar: Avatar | null }>('cx-me', { id: '', secret: '', name: '', colour: '', avatar: null });
+  let changed = false;
   if (!me.id || !me.secret) {
     me.id = `p-${hex(8)}`;
     me.secret = `s-${hex(16)}`;
-    save('cx-me', me);
+    changed = true;
   }
-  return me;
+  if (!isAvatar(me.avatar)) {
+    me.avatar = randomAvatar();
+    changed = true;
+  }
+  if (changed) save('cx-me', me);
+  return me as { id: string; secret: string; name: string; colour: string; avatar: Avatar };
 }
 
-export function saveIdentity(patch: Partial<{ name: string; colour: string }>) {
+// The rooms this device was in lately: coming back to one's link (a reload, a drop) goes straight
+// back in; any other room's link asks who you are first (Join.svelte).
+const ROOMS = 'cx-rooms';
+const ROOM_HOURS = 12;
+
+export function knowsRoom(code: string) {
+  const rooms = load<Record<string, number>>(ROOMS, {});
+  return Date.now() - (rooms[code] ?? 0) < ROOM_HOURS * 3600_000;
+}
+
+export function rememberRoom(code: string) {
+  const rooms = load<Record<string, number>>(ROOMS, {});
+  rooms[code] = Date.now();
+  const recent = Object.entries(rooms)
+    .filter(([, at]) => Date.now() - at < ROOM_HOURS * 3600_000)
+    .slice(-10);
+  save(ROOMS, Object.fromEntries(recent));
+}
+
+export function forgetRoom(code: string) {
+  const rooms = load<Record<string, number>>(ROOMS, {});
+  delete rooms[code];
+  save(ROOMS, rooms);
+}
+
+export function saveIdentity(patch: Partial<{ name: string; colour: string; avatar: Avatar }>) {
   const me = identity();
   save('cx-me', { ...me, ...patch });
 }

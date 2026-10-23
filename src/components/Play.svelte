@@ -9,16 +9,18 @@
   import { t } from '../lib/i18n.svelte';
   import Arena from './Arena.svelte';
   import Tuner from './Tuner.svelte';
-  import SettingsSheet from './SettingsSheet.svelte';
+  import Settings from './Settings.svelte';
 
   const v = $derived(online.view!);
   const colours = $derived(new Map(v.members.map((m) => [m.id, m.colour])));
   const names = $derived(new Map(v.members.map((m) => [m.id, m.name])));
-  const players = $derived(v.members.filter((m) => m.playing).map((p) => ({ id: p.id, name: p.name, colour: p.colour, team: p.team })));
+  const players = $derived(v.members.filter((m) => m.playing).map((p) => ({ id: p.id, name: p.name, colour: p.colour, team: p.team, avatar: p.avatar })));
   const playing = $derived(players.some((p) => p.id === myId()));
   const own = $derived(new Set(playing ? [myId()] : []));
   let tuneOpen = $state(false);
   let settingsOpen = $state(false);
+  let settingsButton: HTMLElement | undefined = $state();
+  const hostName = $derived(v.members.find((m) => m.id === v.host)?.name ?? '');
   let area = $state<HTMLDivElement>();
 
   const colourOf = (pid: string) => colours.get(pid) ?? '#888';
@@ -56,13 +58,11 @@
 <Arena {world} version={online.version} {players} me={myId()} {own} {aheadMs} behindTicks={prefs.behind} inputFor={() => inputFor()} {colourOf}
   code={v.code} {keys} {banner} bind:area>
   {#snippet actions()}
-    <button class="btn small ghost" type="button" onclick={() => (settingsOpen = true)}>{t('Settings')}</button>
     {#if isHost()}
       <button class="btn small ghost" type="button" onclick={() => (tuneOpen = !tuneOpen)}>{t('Tune')}</button>
-      <button class="btn small ghost" type="button" onclick={stopGame}>{t('End game')}</button>
-    {:else}
-      <button class="btn small ghost" type="button" onclick={leaveRoom}>{t('Leave')}</button>
     {/if}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <ewo-settings-button bind:this={settingsButton} onclick={() => (settingsOpen = true)}></ewo-settings-button>
   {/snippet}
 
   {#if tuneOpen && isHost()}
@@ -81,7 +81,14 @@
   </div>
 </Arena>
 
-<SettingsSheet bind:open={settingsOpen} />
+<Settings
+  open={settingsOpen}
+  onclose={() => {
+    settingsOpen = false;
+    settingsButton?.focus();
+  }}
+  game={{ host: isHost(), hostName, onend: (signal) => stopGame(signal), onleave: leaveRoom }}
+/>
 
 <style>
   .drawer {

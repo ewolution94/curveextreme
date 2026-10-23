@@ -10,6 +10,7 @@ import { BUILT_IN, cleanFeel } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { POWERUPS, POWERUP_KINDS } from '../shared/powerups.mjs';
 import { isColour, freeColour } from '../shared/colours.mjs';
+import { cleanAvatar } from './avatar.mjs';
 
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const MAX_PLAYERS = 10;
@@ -47,7 +48,7 @@ export function createRooms({ profiles }) {
 
   /** A page connected: one per tab. */
   function connect(ws) {
-    const conn = { ws, id: null, secret: null, name: 'Player', colour: null, room: null };
+    const conn = { ws, id: null, secret: null, name: 'Player', colour: null, avatar: null, room: null };
     ws.on('message', (text) => {
       let msg;
       try {
@@ -74,11 +75,18 @@ export function createRooms({ profiles }) {
         conn.secret = String(msg.secret);
         conn.name = clean(msg.name, 20) || 'Player';
         conn.colour = isColour(msg.colour) ? msg.colour : null;
+        conn.avatar = cleanAvatar(msg.avatar);
         return send({ t: 'hi', protocol: 1 });
       case 'ping':
         return send({ t: 'pong', c: msg.c });
       case 'profiles':
         return send({ t: 'profiles', ...profiles.list() });
+      case 'peek': {
+        // A room's link, before the name is asked: is the room there, and is there room in it?
+        const code = String(msg.code ?? '').toUpperCase().slice(0, 8);
+        const room = rooms.get(code);
+        return send({ t: 'peek', code, exists: !!room, full: !!room && room.members.size >= MAX_PLAYERS * 2 });
+      }
     }
     if (!conn.id) return send({ t: 'error', code: 'no-hello' });
     switch (msg.t) {
@@ -144,7 +152,7 @@ export function createRooms({ profiles }) {
         phase: this.phase,
         settings: this.settings,
         members: [...this.members.values()].map((m) => ({
-          id: m.id, name: m.name, colour: m.colour, team: m.team,
+          id: m.id, name: m.name, colour: m.colour, avatar: m.avatar, team: m.team,
           connected: !!m.conn, playing: !!this.match?.players.some((p) => p.id === m.id),
         })),
         results: this.results,
@@ -163,7 +171,7 @@ export function createRooms({ profiles }) {
         if (this.members.size >= MAX_PLAYERS * 2) return conn.ws.send(JSON.stringify({ t: 'error', code: 'full' }));
         const taken = new Set([...this.members.values()].map((x) => x.colour));
         m = {
-          id: conn.id, secret: conn.secret, name: conn.name,
+          id: conn.id, secret: conn.secret, name: conn.name, avatar: conn.avatar ?? cleanAvatar(null),
           colour: conn.colour && !taken.has(conn.colour) ? conn.colour : freeColour(taken),
           team: this.smallestTeam(),
           input: { dir: 0, presses: [], seq: 0 },
@@ -174,6 +182,7 @@ export function createRooms({ profiles }) {
       if (m.conn && m.conn !== conn) m.conn.ws.close(4000); // the same player in a newer tab
       m.conn = conn;
       m.name = conn.name;
+      if (conn.avatar) m.avatar = conn.avatar;
       m.input = { dir: 0, presses: [], seq: 0 }; // a new page numbers its inputs from 1 again
       conn.room = this;
       this.emptySince = 0;
@@ -229,6 +238,10 @@ export function createRooms({ profiles }) {
       const m = this.members.get(conn.id);
       if (!m) return;
       if (msg.name !== undefined) m.name = clean(msg.name, 20) || m.name;
+      if (msg.avatar !== undefined) {
+        m.avatar = cleanAvatar(msg.avatar);
+        conn.avatar = m.avatar;
+      }
       if (msg.colour !== undefined && isColour(msg.colour)) {
         const taken = [...this.members.values()].some((x) => x !== m && x.colour === msg.colour);
         if (!taken) m.colour = msg.colour;
@@ -359,7 +372,7 @@ export function createRooms({ profiles }) {
       this.results = {
         type: match.rules.type,
         winner: match.winner,
-        standings: match.standings(),
+        standings: match.standings().map((s) => ({ ...s, avatar: this.members.get(s.id)?.avatar ?? null })),
         teamWins: match.teamWins,
         rounds: match.roundNo,
         target: match.rules.target,

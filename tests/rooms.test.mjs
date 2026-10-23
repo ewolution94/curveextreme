@@ -57,6 +57,11 @@ test('a room: create, join, play a round, ack inputs, join late', async () => {
     assert.equal(room.host, 'id-anna-0000');
 
     const b = await client('ben');
+    b.send({ t: 'peek', code: room.code.toLowerCase() });
+    const peek = await b.next((m) => m.t === 'peek');
+    assert.deepEqual(peek, { t: 'peek', code: room.code, exists: true, full: false });
+    b.send({ t: 'peek', code: 'ZZZZ' });
+    assert.equal((await b.next((m) => m.t === 'peek')).exists, room.code === 'ZZZZ');
     b.send({ t: 'join', code: room.code });
     const seen = await b.next((m) => m.t === 'room' && m.members.length === 2);
     const colours = seen.members.map((m) => m.colour);

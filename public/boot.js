@@ -1,8 +1,21 @@
-// The page's language before first paint (CurveExtreme keeps it in cx-prefs), then the splash
-// screen's switch, copied from development/plans/splash-rollout/boot-splash.js. Dark only, so no theme.
+// The page's language before first paint (the family's `ewo:lang`: de, en or system; keep in step with
+// src/lib/i18n.svelte.ts), then the splash screen's switch, copied from
+// development/plans/splash-rollout/boot-splash.js. Dark only, so no theme.
 try {
-  var prefs = JSON.parse(localStorage.getItem('cx-prefs') || '{}');
-  var lang = prefs.lang === 'de' || prefs.lang === 'en' ? prefs.lang : String(navigator.language || '').toLowerCase().slice(0, 2) === 'de' ? 'de' : 'en';
+  var lang = localStorage.getItem('ewo:lang');
+  if (lang !== 'en' && lang !== 'de') {
+    var old = null;
+    try { old = JSON.parse(localStorage.getItem('cx-prefs') || '{}').lang; } catch (e) {}
+    if (lang !== 'system' && (old === 'en' || old === 'de')) lang = old;
+    else {
+      var tags = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
+      lang = 'en';
+      for (var i = 0; i < tags.length; i++) {
+        var base = String(tags[i]).toLowerCase().slice(0, 2);
+        if (base === 'de' || base === 'en') { lang = base; break; }
+      }
+    }
+  }
   document.documentElement.lang = lang;
 } catch (e) {}
 

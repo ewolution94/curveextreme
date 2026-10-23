@@ -14,7 +14,7 @@
   import Scoreboard from './Scoreboard.svelte';
   import Wordmark from './Wordmark.svelte';
 
-  type Player = { id: string; name: string; colour: string; team: number };
+  type Player = { id: string; name: string; colour: string; team: number; avatar?: number[] | null };
   type Props = {
     world: World;
     version: number;
@@ -162,7 +162,8 @@
   }
   .actions {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 6px;
   }
   .group {
     width: 100%;

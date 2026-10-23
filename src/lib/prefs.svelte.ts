@@ -1,5 +1,6 @@
 // This device's settings: how the field and your curve are shown (the steering pick's switches, so a
-// playtest can flip them), sound, language, the shared keyboard's keys. Kept in localStorage.
+// playtest can flip them), sound, the shared keyboard's keys. Kept in localStorage. The language is
+// the family's own key (src/lib/i18n.svelte.ts).
 
 import { load, save } from './store';
 import { DEFAULT_SEAT_KEYS, type BothKeys } from './input';
@@ -7,8 +8,6 @@ import { setSound } from './sound';
 
 export type FieldSize = 'auto' | 'reference' | 'fill';
 export type Motion = 'predict' | 'server';
-
-const browserLang = (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('de')) ? 'de' : 'en';
 
 // v2 (2026-10-23): the field fills the screen by default (the user's call); a device that saved the
 // old default, auto, moves to fill once. Like the original stays one setting away.
@@ -20,7 +19,6 @@ export const prefs = $state(
   load('cx-prefs', {
     v: VERSION,
     sound: true,
-    lang: browserLang as 'en' | 'de',
     /** fill: all the room there is; reference: the reference's scale (window height ÷ 922 px per unit);
      *  auto: the reference's scale on a computer, the whole screen on a phone */
     fieldSize: 'fill' as FieldSize,

@@ -6,8 +6,9 @@
   import type { Snippet } from 'svelte';
   import type { World } from '../lib/world';
   import { t } from '../lib/i18n.svelte';
+  import Avatar from './Avatar.svelte';
 
-  type Player = { id: string; name: string; colour: string; team: number };
+  type Player = { id: string; name: string; colour: string; team: number; avatar?: number[] | null };
   type Props = { world: World; players: Player[]; me: string | null; version: number; children?: Snippet };
   let { world, players, me, version, children }: Props = $props();
 
@@ -84,7 +85,7 @@
 
 {#snippet row(r: Player & { points: number; alive: boolean }, bar: boolean)}
   <li class="row" class:out={!r.alive && info.phase !== 'still'} style:--c={r.colour}>
-    <span class="sw"></span>
+    <span class="who">{#if r.avatar}<span class="av"><Avatar avatar={r.avatar} size={24} ring={false} /></span>{/if}<span class="sw"></span></span>
     <span class="nm">{r.name}{#if r.id === me}<em>{t('you')}</em>{/if}</span>
     {#key chips[r.id]?.at}
       <span class="plus" class:on={!!chips[r.id]} aria-hidden={!chips[r.id]}>+{chips[r.id]?.n ?? 1}</span>
@@ -152,6 +153,14 @@
   }
   .row.out {
     opacity: 0.4;
+  }
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .av {
+    display: flex;
   }
   .sw {
     position: relative;
@@ -256,6 +265,9 @@
     }
     .sw {
       width: 14px;
+    }
+    .av {
+      display: none;
     }
     .nm {
       font-size: 14px;

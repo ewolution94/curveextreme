@@ -2,86 +2,261 @@
    the world the meeting already knows, cleaned up. A black field inside a thin white line, grey type
    that stays out of the way, so the ten curves and the discs carry all the colour. Archivo, wide for
    the name and the numbers. The family pair: Ultraviolet leads, Ember second (Folio's projects.css,
-   the dark values: the app is dark only). The canvas takes its colours from render.ts's Theme. */
+   the dark values: the app is dark only). The canvas takes its colours from render.ts's Theme.
+   The family's frame (the user, 2026-10-23: "the consistent feeling we established"): Folio's tokens
+   and elements are the bones (vendor/ewo), the panels, buttons and labels are the newest games'
+   (Würfle's app.css), in look A's colours. */
+/* Folio's tokens without its faces: Archivo is in src/main.ts. */
+@import '../vendor/ewo/tokens/tokens.css';
+@import '../vendor/ewo/tokens/projects.css';
+@import '../vendor/ewo/tokens/base.css';
 
-:root {
+:root,
+:root[data-theme='light'] {
+  /* "only": no forced light or dark from the browser. Dark only. */
+  color-scheme: only dark;
+  --ewo-light: 0;
+
   --ground: #0b0b0c;
   --panel: #131315;
   --panel-2: #1b1b1e;
   --rule: rgb(255 255 255 / 0.1);
+  --line: rgb(255 255 255 / 0.16);
   --ink: #f2f2f3;
+  --ink-2: #c8c8cd;
   --muted: #a3a3a9;
+  --mute: var(--muted);
   --edge: #e9e9ea;
-  --accent: #b07aff;
+  --accent: #b07aff; /* Ultraviolet */
+  --accent-deep: #8226dc;
   --accent-ink: #14081f;
   --ember: #ffa133;
-  --danger: #ff5c5c;
+  --danger: #ff6b5e;
   --green: #1fae4b;
   --red: #e5322d;
   --blue: #2a6ae8;
   --display: 'Archivo Variable', 'Arial Black', system-ui, sans-serif;
   --body: 'Archivo Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --text: var(--body);
   --radius: 10px;
-  color-scheme: dark;
+  --gutter: clamp(16px, 3vw, 40px);
+  --page: 1100px;
+  --bar-h: 56px;
+
+  /* Folio's shared tokens (its sheet, segmented, switch, guide, connection use these), in look A. */
+  --ewo-sans: var(--body);
+  --ewo-serif: var(--display);
+  --ewo-bg: var(--panel);
+  --ewo-bg-raised: var(--panel-2);
+  --ewo-panel: var(--panel);
+  --ewo-fg: var(--ink);
+  --ewo-fg-2: var(--ink-2);
+  --ewo-fg-3: var(--muted);
+  --ewo-line: var(--line);
+  --ewo-line-2: rgb(255 255 255 / 0.08);
+  --ewo-line-strong: rgb(255 255 255 / 0.42);
+  --ewo-fill-2: rgb(255 255 255 / 0.06);
+  --ewo-fill-3: rgb(255 255 255 / 0.1);
+  --ewo-accent: var(--accent);
+  --ewo-accent-2: var(--ember);
+  --ewo-accent-ink: var(--accent-ink);
+  --ewo-focus: 3px solid var(--accent);
+}
+
+[data-ewo-project='curveextreme'] {
+  --ewo-accent: var(--accent);
+  --ewo-accent-2: var(--ember);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; }
+html {
+  background: var(--ground);
+  overflow-x: clip;
+  font-synthesis: none;
+}
+html, body { min-height: 100%; }
 body {
   margin: 0;
-  background: var(--ground);
+  background: transparent;
   color: var(--ink);
   font: 15px/1.45 var(--body);
   -webkit-font-smoothing: antialiased;
 }
-:where(button, a, label, summary, input, select, textarea, [role='button'], [role='radio']) { touch-action: manipulation; }
+a { color: inherit; }
 button, input, select { font: inherit; color: inherit; }
-h1, h2, h3 { font-family: var(--display); font-weight: 800; font-stretch: 125%; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
-.wide { font-stretch: 118%; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button { cursor: pointer; }
+/* No double-tap zoom on the iPhone on anything you tap (learnings/ios-and-webkit.md). */
+:where(button, a, label, summary, input, select, textarea, [role='button'], [role='radio']) { touch-action: manipulation; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .num { font-variant-numeric: tabular-nums; }
 
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 44px; padding: 0 18px;
-  border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--panel-2); color: var(--ink);
-  font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: transform 80ms ease, background-color 120ms ease;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-.btn:hover { background: #23232b; }
-.btn:active { transform: scale(0.97); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn.primary:hover { background: #c49bff; }
-.btn.ghost { background: transparent; }
-.btn.small { min-height: 34px; padding: 0 12px; font-size: 13px; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
+/* ---- the family's pieces, in look A ------------------------------------------------------ */
+
+/* A panel: the arena's dark, a thin line, a quiet shadow below. */
+.sheet {
+  position: relative;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 32px -20px rgb(0 0 0 / 0.9);
+}
+
+/* Headings: Archivo wide and heavy, like the name. */
+.display {
+  font-family: var(--display);
+  font-weight: 800;
+  font-stretch: 125%;
+  letter-spacing: -0.01em;
+}
+
+/* Small labels: capitals, spaced, grey. */
+.label {
+  font: 600 12px/1.25 var(--body);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A button: a thin light line on the dark; it sinks a little when pressed. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 18px;
+  border: 1.5px solid rgb(255 255 255 / 0.28);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font: 650 16px / 1 var(--body);
+  font-stretch: 108%;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--ewo-dur-1, 120ms) var(--ewo-ease, ease), background-color var(--ewo-dur-1, 120ms) var(--ewo-ease, ease);
+}
+.btn:active:not(:disabled, [aria-disabled='true']) { transform: translateY(1px) scale(0.99); }
+/* The main move: Ultraviolet, dark ink on it. */
+.btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+@media (hover: hover) {
+  .btn:not(.primary):hover:not(:disabled) { background: rgb(255 255 255 / 0.06); }
+  .btn.primary:hover:not(:disabled) { background: #c49bff; }
+}
+.btn.quiet,
+.btn.ghost {
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.btn.small {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.btn.block { width: 100%; }
+.btn.danger-fill {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #1d0806;
+}
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 14px/1.1 var(--body);
+  -webkit-tap-highlight-color: transparent;
+}
+.chip[aria-pressed='true'],
+.chip[aria-checked='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: rgb(176 122 255 / 0.16);
+}
+
+/* Form controls stay at 16px or more: smaller ones make iOS zoom the page. */
+.input,
 .field-input {
-  min-height: 44px; padding: 0 12px;
-  border: 1px solid var(--rule); border-radius: var(--radius);
-  background: var(--ground); color: var(--ink);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1.5px solid rgb(255 255 255 / 0.22);
+  border-radius: var(--radius);
+  background: var(--ground);
+  color: var(--ink);
+  font: 500 18px / 1.2 var(--body);
+}
+.input::placeholder,
+.field-input::placeholder {
+  color: rgb(242 242 243 / 0.4);
+  font-weight: 400;
 }
 select.field-input {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 34px;
+  font-size: 16px;
   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
   background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
   background-size: 5px 5px;
   background-repeat: no-repeat;
 }
-select.field-input:disabled { opacity: 0.7; }
 
-.label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }
-
-dialog.sheet {
-  border: 1px solid var(--rule); border-radius: 16px; padding: 0;
-  background: var(--panel); color: var(--ink);
-  width: min(520px, calc(100vw - 32px)); max-height: min(86vh, 820px);
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
 }
-dialog.sheet::backdrop { background: rgb(0 0 0 / 0.6); }
+.sure {
+  margin: 0;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pair .btn { flex: 1 1 140px; }
+.hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
