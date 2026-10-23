@@ -54,7 +54,7 @@ const SECURITY_HEADERS = {
   ].join('; '),
 };
 
-const game = createGameServer({ dataDir: DATA_DIR });
+const game = createGameServer({ dataDir: DATA_DIR, censusTarget: process.env.CURVEEXTREME_CENSUS ?? '' });
 const compressed = new Map();
 
 async function resolveFile(pathname) {
@@ -111,7 +111,7 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/healthz') return res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
   try {
-    if (game.handle(req, res)) return;
+    if (await game.handle(req, res)) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405).end();
       return;

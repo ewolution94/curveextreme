@@ -45,6 +45,7 @@ npm run build && npm start   # the production server on :8080
 | `PORT` | `8080` | the port (`--port` too) |
 | `HOST` | `0.0.0.0` | |
 | `DATA_DIR` | `./data` (`/data` in the image) | saved feel profiles |
+| `CURVEEXTREME_CENSUS` | (off) | Census's ingest origin, e.g. `http://census:4901`: `/_e` and `/_e.js` are forwarded there |
 
 ## Layout
 
@@ -57,9 +58,10 @@ src/components/  Home, Lobby, Play, Results, Local, Field, Scoreboard, Tuner, th
 tests/      *.test.mjs (unit, CI) and *.sim.mjs (simulations, local)
 ```
 
-## Deploy
+## Deploy (NAS)
 
-Not live yet: the NAS port, the stack (`deploy/portainer-stack.yml`), the hostname and the family
-(Census, Atrium, Aale Spiele, Pulse, the landing) come with `/new-app`. CI is ready: `ci.yml` checks
-types, tests, builds and smoke-tests the production server; `docker-publish.yml` publishes
-`ghcr.io/ewolution94/curveextreme` on a push to `release`.
+A push to `release` is the deploy: `docker-publish.yml` runs CI (`ci.yml`: types, unit tests, the build,
+a smoke test of the production server with a room over the socket), publishes
+`ghcr.io/ewolution94/curveextreme:latest`, and the shared Watchtower recreates the container from
+`deploy/portainer-stack.yml` (port 7000, the `/data` volume, Census over the `ewolution` network).
+https://curveextreme.ewolution.cloud/ through the Cloudflare tunnel. A deploy ends running rooms.

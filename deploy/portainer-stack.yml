@@ -1,0 +1,47 @@
+# The CurveExtreme stack Portainer runs on the NAS.
+#
+# This is deliberately NOT the repo's docker-compose.yml. That one carries `build: .`, which would make
+# Portainer compile the app on the NAS instead of pulling the image CI already published.
+#
+# Auto-updates come from the shared Watchtower stack (development/.claude/skills/portainer/watchtower/),
+# which only touches containers carrying the label below. With it, a push to `release` is the entire
+# deploy. A deploy ends any room in progress (rooms live in memory); saved feel profiles live in the
+# volume and stay.
+
+services:
+  curveextreme:
+    image: ghcr.io/ewolution94/curveextreme:latest
+    container_name: curveextreme
+    restart: unless-stopped
+    ports:
+      # The port from the workspace's registry (development/.claude/skills/portainer/ports.json).
+      - "7000:7000"
+    environment:
+      - PORT=7000
+      - TZ=Europe/Berlin
+      - DATA_DIR=/data
+      # Visit counts: /_e and /_e.js are forwarded to Census over the `ewolution` network.
+      # Remove the line to stop counting; the page doesn't change either way.
+      - CURVEEXTREME_CENSUS=http://census:4901
+    volumes:
+      # The feel profiles saved from a room's Tune panel.
+      - curveextreme-data:/data
+    networks:
+      # The shared network Census listens on (Portainer → Networks → `ewolution`).
+      - ewolution
+    healthcheck:
+      # Every ~10 minutes, each container on its own interval so they never line up (plans/nas-load.md).
+      interval: 789s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      # The opt-in the shared Watchtower looks for (WATCHTOWER_LABEL_ENABLE=true).
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  curveextreme-data:
+
+networks:
+  ewolution:
+    external: true

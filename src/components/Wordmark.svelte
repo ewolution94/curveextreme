@@ -5,8 +5,7 @@
 <div class="mark {size}" aria-label="CurveExtreme">
   <svg viewBox="0 0 120 40" aria-hidden="true">
     <path d="M4 34 C 22 34, 26 6, 52 6 S 84 30, 104 20" fill="none" stroke="var(--accent)" stroke-width="5" />
-    <path d="M60 14 l 0 0" stroke="#000" stroke-width="7" />
-    <circle cx="104" cy="20" r="3.4" fill="var(--accent)" />
+    <circle cx="104" cy="20" r="3.4" fill="var(--ember)" />
   </svg>
   <span class="word"><span>Curve</span><span class="x">Extreme</span></span>
 </div>

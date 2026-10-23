@@ -55,6 +55,13 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' $base/assets/missing.js)" = 404
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST $base/)" = 405
           curl -sf $base/api/profiles | grep -q '"name":"Classic"'
+          curl -sf $base/manifest.webmanifest | grep -q '"name": "CurveExtreme"'
+          curl -sf -o /dev/null $base/sw.js
+          curl -sf -o /dev/null $base/boot.js
+          curl -sf -o /dev/null $base/icons/icon-192.png
+          # The Census forwarder is wired in; without CURVEEXTREME_CENSUS it answers locally.
+          test "$(curl -s -o /dev/null -w '%{http_code}' $base/_e.js)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data '{}' $base/_e)" = 204
           # A room over the socket: hello, create, the room's view.
           node -e '
             const ws = new WebSocket("ws://127.0.0.1:6399/ws");

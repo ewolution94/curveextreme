@@ -1,5 +1,4 @@
-# For trying the image locally (it builds from source). The NAS stack (deploy/portainer-stack.yml)
-# comes with /new-app and the port from the registry.
+# For trying the image locally (it builds from source). The NAS runs deploy/portainer-stack.yml.
 services:
   curveextreme:
     build: .

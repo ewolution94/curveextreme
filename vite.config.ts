@@ -9,7 +9,9 @@ import { createGameServer } from './server/app.mjs';
 function gameServer(): Plugin {
   const game = createGameServer({ dataDir: new URL('./data', import.meta.url).pathname });
   const attach = (s: any) => {
-    s.middlewares.use((req: any, res: any, next: () => void) => (game.handle(req, res) ? undefined : next()));
+    s.middlewares.use((req: any, res: any, next: (e?: unknown) => void) => {
+      game.handle(req, res).then((done: boolean) => done || next(), next);
+    });
     s.httpServer?.on('upgrade', (req: any, socket: any, head: any) => {
       // Vite's own socket (hot reload) asks for the 'vite-hmr' protocol; ours is /ws
       if (req.headers['sec-websocket-protocol']?.includes('vite-hmr')) return;

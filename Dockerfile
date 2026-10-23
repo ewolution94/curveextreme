@@ -23,6 +23,7 @@ USER node
 VOLUME /data
 EXPOSE 8080
 # Shell form so $PORT expands: the NAS stack runs on a different port than the default.
-# The interval is the app's own slot from development/plans/nas-load.md, set by /new-app.
-HEALTHCHECK --interval=600s --timeout=10s --start-period=60s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" || exit 1
+# Every ~10 minutes, each of the NAS's containers on its own interval so they never line up
+# (development/plans/nas-load.md); CurveExtreme's slot is 789 s.
+HEALTHCHECK --interval=789s --timeout=10s --start-period=60s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" || exit 1
 CMD ["node", "server/server.mjs"]
