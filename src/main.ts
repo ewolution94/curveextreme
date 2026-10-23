@@ -1,5 +1,5 @@
-import '@fontsource/unbounded/600.css';
-import '@fontsource/unbounded/800.css';
+// Look A's one face, Archivo, with its width axis: wide for the name and the numbers, normal for the rest.
+import '@fontsource-variable/archivo/wdth.css';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';

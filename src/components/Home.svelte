@@ -12,7 +12,7 @@
   let { onLocal }: { onLocal: () => void } = $props();
   const me = identity();
   let name = $state(me.name);
-  let colour = $state(me.colour || '#ffe14d');
+  let colour = $state(me.colour || '#ffe53b');
   let code = $state('');
   let settingsOpen = $state(false);
   let statsOpen = $state(false);

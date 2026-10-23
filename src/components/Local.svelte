@@ -10,8 +10,7 @@
   import { keyLabel } from '../lib/input';
   import { prefs, savePrefs } from '../lib/prefs.svelte';
   import { t } from '../lib/i18n.svelte';
-  import Field from './Field.svelte';
-  import Scoreboard from './Scoreboard.svelte';
+  import Arena from './Arena.svelte';
   import Wordmark from './Wordmark.svelte';
 
   let { onExit }: { onExit: () => void } = $props();
@@ -65,6 +64,17 @@
   onDestroy(end);
 
   const colourOf = (pid: string) => seats.find((s) => s.id === pid)?.colour ?? '#888';
+  const localBanner = $derived.by(() => {
+    if (!game) return null;
+    void game.state.version;
+    const w = game.world;
+    if (w.phase === 'still' || w.phase === 'free') return { big: t('Round {n}', { n: w.no }), small: t('Get ready') };
+    if (w.phase === 'linger' || w.phase === 'done') {
+      const name = seats.find((s) => s.id === w.winner)?.name;
+      return { big: name ? t('{name} takes the round', { name }) : t('Nobody takes the round'), small: '' };
+    }
+    return null;
+  });
   const conflict = $derived.by(() => {
     const codes = seats.flatMap((s) => s.keys);
     return new Set(codes).size !== codes.length || codes.some((c) => !c);
@@ -74,14 +84,13 @@
 <svelte:window onkeydown={bindNext} />
 
 {#if game && !game.state.over}
-  <div class="play">
-    <div class="side">
-      <Scoreboard world={game.world} players={seats.map((s) => ({ ...s, team: 0 }))} me={null} version={game.state.version} />
+  <Arena world={game.world} version={game.state.version} players={seats.map((s) => ({ ...s, team: 0 }))} me={null}
+    own={new Set(seats.map((s) => s.id))} aheadMs={() => 0} behindTicks={0} inputFor={(pid) => game!.inputFor(pid)} {colourOf}
+    keys={seats.map((s) => `${s.name} ${keyLabel(s.keys[0])} ${keyLabel(s.keys[1])}`).join(' · ')} banner={localBanner}>
+    {#snippet actions()}
       <button class="btn small ghost" type="button" onclick={end}>{t('End game')}</button>
-    </div>
-    <Field world={game.world} own={new Set(seats.map((s) => s.id))} predict={prefs.motion === 'predict'} aheadMs={() => 0} behindTicks={0}
-      inputFor={(pid) => game!.inputFor(pid)} {colourOf} size={prefs.fieldSize} />
-  </div>
+    {/snippet}
+  </Arena>
 {:else if game?.state.over}
   <main class="setup">
     <h1>{t('{name} wins', { name: seats.find((s) => s.id === game?.state.winner)?.name ?? '?' })}</h1>
@@ -216,19 +225,5 @@
     width: 8px;
     height: 22px;
     border-radius: 2px;
-  }
-  .play {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    gap: 20px;
-    padding: 16px;
-    user-select: none;
-  }
-  .side {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: flex-start;
   }
 </style>

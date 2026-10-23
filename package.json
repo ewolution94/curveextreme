@@ -18,7 +18,7 @@
     "test:sim": "node --test tests/*.sim.mjs"
   },
   "devDependencies": {
-    "@fontsource/unbounded": "^5.3.0",
+    "@fontsource-variable/archivo": "^5.3.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tsconfig/svelte": "^5.0.8",
     "svelte": "^5.57.1",

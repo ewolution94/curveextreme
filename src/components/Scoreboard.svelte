@@ -1,16 +1,20 @@
 <script lang="ts">
-  // The scoreboard beside the field: the target, the round, everyone by points (a "+1" chip when they
-  // score), dimmed once they crashed this round; in teams, each team's round wins above its players.
+  // Look A's board beside the field: the target (an outlined number, "2 points clear"), then everyone
+  // by points: a little curve in their colour, the name, a "+n" ring that pops when they score, the
+  // points in wide Archivo, and a thin bar towards the target. Dimmed once they crashed this round. In
+  // teams, each team's round wins head its players.
+  import type { Snippet } from 'svelte';
   import type { World } from '../lib/world';
   import { t } from '../lib/i18n.svelte';
 
   type Player = { id: string; name: string; colour: string; team: number };
-  let { world, players, me, version }: { world: World; players: Player[]; me: string | null; version: number } = $props();
+  type Props = { world: World; players: Player[]; me: string | null; version: number; children?: Snippet };
+  let { world, players, me, version, children }: Props = $props();
 
   let chips = $state<Record<string, { n: number; at: number }>>({});
   let seen: Record<string, number> = {};
 
-  // a "+n" chip when someone scores (n adds up while the chip still shows)
+  // a "+n" when someone scores (n adds up while the ring still shows)
   $effect(() => {
     void version;
     const pts = world.points;
@@ -20,10 +24,15 @@
       const before = seen[p.id] ?? v;
       if (v > before) {
         const prev = chips[p.id];
-        chips[p.id] = { n: v - before + (prev && now - prev.at < 1500 ? prev.n : 0), at: now };
+        chips[p.id] = { n: v - before + (prev && now - prev.at < 3200 ? prev.n : 0), at: now };
       }
       seen[p.id] = v;
     }
+  });
+
+  const info = $derived.by(() => {
+    void version;
+    return { type: world.type, target: world.target, teamTarget: world.teamTarget, phase: world.phase };
   });
 
   const rows = $derived.by(() => {
@@ -38,154 +47,235 @@
       .sort((a, b) => b.points - a.points);
   });
 
-  const info = $derived.by(() => {
-    void version;
-    return { no: world.no, type: world.type, target: world.target, teamTarget: world.teamTarget, phase: world.phase };
-  });
-
   const teams = $derived.by(() => {
     void version;
     if (world.type !== 'teams') return [];
     const ids = [...new Set(players.map((p) => p.team))].sort();
     return ids.map((team) => ({ team, wins: world.teamWins[team] ?? 0, members: rows.filter((r) => r.team === team) }));
   });
-
-  // chips fade after 1.5 s
-  let tick = $state(0);
-  $effect(() => {
-    const id = setInterval(() => tick++, 250);
-    return () => clearInterval(id);
-  });
-  const showChip = (id: string) => {
-    void tick;
-    const c = chips[id];
-    return c && performance.now() - c.at < 1500 ? c.n : 0;
-  };
 </script>
 
-<aside class="board">
-  <div class="head">
-    <span class="round">{t('Round {n}', { n: info.no })}</span>
-    <span class="target num" title={info.type === 'teams' ? t('First team to {n}', { n: info.teamTarget }) : t('First to {n}', { n: info.target })}>
-      {info.type === 'teams' ? info.teamTarget : info.target}
-    </span>
+<aside class="board" aria-label={t('Players')}>
+  <div class="target">
+    <small>{info.type === 'teams' ? t('First team to') : t('First to')}</small>
+    <b class="num">{info.type === 'teams' ? info.teamTarget : info.target}</b>
+    <small>{info.type === 'teams' ? t('rounds') : t('2 points clear')}</small>
   </div>
-  {#if info.type === 'teams'}
-    {#each teams as tm (tm.team)}
-      <div class="team">
-        <span class="label">{t('Team {n}', { n: tm.team + 1 })}</span>
-        <span class="wins num">{tm.wins}</span>
-      </div>
-      {#each tm.members as r (r.id)}
-        {@render row(r)}
+  <ol class="rows">
+    {#if info.type === 'teams'}
+      {#each teams as tm (tm.team)}
+        <li class="row team" style:--c="var(--ink)">
+          <span class="nm">{t('Team {n}', { n: tm.team + 1 })}</span>
+          <b class="sc num">{tm.wins}</b>
+          <span class="bar"><i style:--p={Math.min(1, tm.wins / Math.max(1, info.teamTarget))}></i></span>
+        </li>
+        {#each tm.members as r (r.id)}
+          {@render row(r, false)}
+        {/each}
       {/each}
-    {/each}
-  {:else}
-    {#each rows as r (r.id)}
-      {@render row(r)}
-    {/each}
-  {/if}
+    {:else}
+      {#each rows as r (r.id)}
+        {@render row(r, true)}
+      {/each}
+    {/if}
+  </ol>
+  {@render children?.()}
 </aside>
 
-{#snippet row(r: { id: string; name: string; colour: string; points: number; alive: boolean })}
-  <div class="row" class:dead={!r.alive && info.phase !== 'still'} class:me={r.id === me}>
-    <i style:background={r.colour}></i>
-    <span class="name">{r.name}</span>
-    {#if showChip(r.id)}
-      <span class="chip num" style:background={r.colour}>+{showChip(r.id)}</span>
-    {/if}
-    <span class="pts num">{r.points}</span>
-  </div>
+{#snippet row(r: Player & { points: number; alive: boolean }, bar: boolean)}
+  <li class="row" class:out={!r.alive && info.phase !== 'still'} style:--c={r.colour}>
+    <span class="sw"></span>
+    <span class="nm">{r.name}{#if r.id === me}<em>{t('you')}</em>{/if}</span>
+    {#key chips[r.id]?.at}
+      <span class="plus" class:on={!!chips[r.id]} aria-hidden={!chips[r.id]}>+{chips[r.id]?.n ?? 1}</span>
+    {/key}
+    <b class="sc num">{r.points}</b>
+    {#if bar}<span class="bar"><i style:--p={Math.min(1, r.points / Math.max(1, info.target))}></i></span>{/if}
+  </li>
 {/snippet}
 
 <style>
   .board {
-    width: 220px;
+    width: 288px;
     flex: none;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 4px 0;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  .round {
-    font: 800 13px/1 var(--display);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    min-width: 0;
+    min-height: 0;
   }
   .target {
-    min-width: 54px;
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: var(--accent);
-    color: var(--accent-ink);
-    font: 800 22px/1 var(--display);
-    text-align: center;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-content: center;
+    column-gap: 16px;
+    row-gap: 4px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--rule);
   }
-  .team {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-top: 6px;
+  .target small {
+    grid-column: 2;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
-  .wins {
-    font: 800 16px/1 var(--display);
+  .target small:first-child {
+    align-self: end;
+    color: var(--ink);
+  }
+  .target b {
+    grid-row: 1 / 3;
+    grid-column: 1;
+    font-size: 46px;
+    font-weight: 800;
+    font-stretch: 118%;
+    line-height: 1;
+    padding: 8px 14px 6px;
+    outline: 1.5px solid var(--edge);
+  }
+  .rows {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: grid;
+    overflow: hidden;
   }
   .row {
     display: grid;
-    grid-template-columns: 6px minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 10px;
-    min-height: 26px;
-    transition: opacity 200ms ease;
+    column-gap: 10px;
+    row-gap: 12px;
+    padding-top: 14px;
+    transition: opacity 0.3s;
   }
-  .row i {
-    width: 6px;
-    height: 20px;
-    border-radius: 2px;
-  }
-  .row.dead {
+  .row.out {
     opacity: 0.4;
   }
-  .row.me .name {
-    font-weight: 700;
+  .sw {
+    position: relative;
+    width: 22px;
+    height: 7px;
+    background: var(--c);
   }
-  .name {
+  .sw::after {
+    content: '';
+    position: absolute;
+    right: -3.5px;
+    top: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--c);
+  }
+  .nm {
+    font-size: 19px;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 16px;
   }
-  .pts {
-    font: 600 18px/1 var(--display);
-    min-width: 2ch;
+  .team .nm {
+    grid-column: 1 / 3;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .nm em {
+    margin-left: 8px;
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .plus {
+    opacity: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--c);
+    border: 1.5px solid var(--c);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+  .plus.on {
+    animation: plus 3.2s both;
+  }
+  @keyframes plus {
+    0% { opacity: 0; transform: scale(0.4); }
+    7% { opacity: 1; transform: scale(1.18); }
+    13% { transform: none; }
+    82% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .sc {
+    font-size: 30px;
+    font-weight: 800;
+    font-stretch: 110%;
+    min-width: 46px;
     text-align: right;
   }
-  .chip {
-    padding: 2px 6px;
-    border-radius: 4px;
-    color: #000;
-    font: 700 12px/1.2 var(--body);
+  .team .sc {
+    grid-column: 4;
   }
-  @media (max-width: 900px), (max-height: 500px) {
+  .bar {
+    grid-column: 1 / -1;
+    display: block;
+    height: 3px;
+    background: rgb(255 255 255 / 0.08);
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    width: calc(var(--p, 0) * 100%);
+    background: var(--c);
+    transition: width 0.4s;
+  }
+  @media (max-height: 560px) {
     .board {
-      width: 150px;
-    }
-    .name {
-      font-size: 13px;
-    }
-    .pts {
-      font-size: 14px;
+      width: 186px;
     }
     .target {
-      font-size: 16px;
-      min-width: 40px;
-      padding: 6px;
+      padding-bottom: 10px;
+      column-gap: 10px;
+    }
+    .target b {
+      font-size: 28px;
+      padding: 5px 9px 4px;
+    }
+    .target small {
+      font-size: 10.5px;
+    }
+    .row {
+      padding-top: 9px;
+      row-gap: 8px;
+      column-gap: 8px;
+    }
+    .sw {
+      width: 14px;
+    }
+    .nm {
+      font-size: 14px;
+    }
+    .nm em {
+      display: none;
+    }
+    .plus {
+      font-size: 11px;
+      padding: 1px 6px;
+    }
+    .sc {
+      font-size: 19px;
+      min-width: 26px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .plus.on {
+      animation: none;
+      opacity: 1;
     }
   }
 </style>

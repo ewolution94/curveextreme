@@ -3,7 +3,8 @@
 
 import { POWERUPS } from '../../shared/powerups.mjs';
 
-export const DISC: Record<string, string> = { green: '#4e9a2c', red: '#cf3636', blue: '#2e64c2' };
+// Look A's disc tones (plans/curveextreme/looks.html).
+export const DISC: Record<string, string> = { green: '#1fae4b', red: '#e5322d', blue: '#2a6ae8' };
 
 type G = CanvasRenderingContext2D;
 const P = Math.PI;
