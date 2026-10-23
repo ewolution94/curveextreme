@@ -9,7 +9,7 @@ import { Match } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
 import { CLASSIC, GSPP } from '../shared/feel.mjs';
 import { POWERUP_KINDS } from '../shared/powerups.mjs';
-import { SHAPES } from '../shared/arenas.mjs';
+import { SHAPES, hitsPillar } from '../shared/arenas.mjs';
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -70,6 +70,7 @@ function play(seed, n, feel, opts = {}) {
         if (e.e === 'done') ended = true;
       }
       for (const c of r.s.curves) assert.ok([c.x, c.y, c.a].every(Number.isFinite), 'positions stay numbers');
+      for (const p of r.s.powerups) assert.ok(!hitsPillar(r.pillars, p.x, p.y, r.feel.powerupRadius), `a disc on a pillar (seed ${seed})`);
       const live = Object.fromEntries(start.players.map((p, i) => [p.id, start.points[p.id] + r.s.gains[i]]));
       for (const [id, v] of Object.entries(live)) assert.ok(v >= last[id], 'points only go up');
       last = live;

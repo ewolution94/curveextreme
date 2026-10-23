@@ -29,7 +29,7 @@ export const CLASSIC = Object.freeze({
   fieldTall: 1,
   spawnMargin: 0.105, // spawns keep this share of the field's side from every wall
   spawnApart: 60, // and this far from each other
-  powerupRadius: 22, // a powerup disc's radius (about 45 across in the replays)
+  powerupRadius: 20, // a powerup disc's radius: 40 across in a Thin FFA replay (measured again 2026-10-23; 45 was a rough read)
   powerupEvery: 2.5, // seconds between powerup spawns on average (a mode multiplies the rate)
   powerupMax: 25, // at most on the field at once
 });
@@ -45,6 +45,7 @@ export const GSPP = Object.freeze({
   gapLength: 22.4,
   fieldWide: 1.62, // 922 × 763 for five players in the replay
   fieldTall: 1.34,
+  powerupRadius: 25, // 50 across in its replay
 });
 
 export const BUILT_IN = Object.freeze({ classic: CLASSIC, gspp: GSPP });

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Match, Round } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
-import { ARENA_NUMBERS, Floor, SHAPES, arenaField, cleanArena } from '../shared/arenas.mjs';
+import { ARENA_NUMBERS, Floor, SHAPES, arenaField, cleanArena, hitsPillar } from '../shared/arenas.mjs';
 import { CLASSIC, fieldFor } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { cos, sin } from '../shared/dmath.mjs';
@@ -123,4 +123,21 @@ test('every arena stays deterministic when actions come late', () => {
     b.advanceTo(1200);
     assert.equal(b.round.hash(), a.round.hash(), shape);
   }
+});
+
+test('a powerup lands only where it’s free: none on a floor full of pillars, every one in the gap', () => {
+  const r = round({ shape: 'square', size: 'normal', pillars: true, patches: false }, 2, { mode: { rate: 1, powerups: ['greenSpeed'] } });
+  toDraw(r);
+  // pillars all over the floor, 40 apart (each 60 wide): nowhere for a disc
+  const all = [];
+  for (let x = 0; x <= r.W + 40; x += 40) for (let y = 0; y <= r.H + 40; y += 40) all.push({ kind: 'square', x, y, r: 30 });
+  r.pillars = all;
+  for (let i = 0; i < 40; i++) r.spawn(r.k, r.rectAt(r.k), []);
+  assert.equal(r.s.powerups.length, 0, 'no free spot, no powerup');
+  // a clearing in the middle: every disc lands in it
+  const cx = r.W / 2, cy = r.H / 2;
+  r.pillars = all.filter((p) => Math.abs(p.x - cx) > 110 || Math.abs(p.y - cy) > 110);
+  for (let i = 0; i < 40; i++) r.spawn(r.k, r.rectAt(r.k), []);
+  assert.ok(r.s.powerups.length > 0);
+  for (const p of r.s.powerups) assert.ok(!hitsPillar(r.pillars, p.x, p.y, CLASSIC.powerupRadius), 'in the clearing');
 });

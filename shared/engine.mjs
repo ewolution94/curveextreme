@@ -525,15 +525,25 @@ export class Round {
         break;
       }
     }
+    // a spot on the floor and clear of the pillars, the whole disc; away from the heads and the other
+    // discs if one turns up. Never a spot that failed: none free means no powerup this time.
     const pr = this.feel.powerupRadius + 4;
+    const apart = 4 * this.feel.powerupRadius * this.feel.powerupRadius;
     const scale = this.scaleAt(k);
-    let x = 0, y = 0;
-    for (let tries = 0; tries < 12; tries++) {
-      x = rect.x0 + pr + this.rand() * Math.max(1, rect.x1 - rect.x0 - 2 * pr);
-      y = rect.y0 + pr + this.rand() * Math.max(1, rect.y1 - rect.y0 - 2 * pr);
+    let spot = null, free = null;
+    for (let tries = 0; tries < 20; tries++) {
+      const x = rect.x0 + pr + this.rand() * Math.max(1, rect.x1 - rect.x0 - 2 * pr);
+      const y = rect.y0 + pr + this.rand() * Math.max(1, rect.y1 - rect.y0 - 2 * pr);
       if (!this.floor.inside(x, y, pr, scale) || hitsPillar(this.pillars, x, y, pr)) continue;
-      if (s.curves.every((c) => !c.alive || dist2(c.x, c.y, x, y) > 1600)) break;
+      free ??= { x, y };
+      if (s.curves.every((c) => !c.alive || dist2(c.x, c.y, x, y) > 1600) && s.powerups.every((q) => dist2(q.x, q.y, x, y) > apart)) {
+        spot = { x, y };
+        break;
+      }
     }
+    spot ??= free;
+    if (!spot) return;
+    const { x, y } = spot;
     const p = { id: s.ids++, kind, x, y, vx: 0, vy: 0 };
     if (k < s.movingUntil) this.drift(p);
     s.powerups.push(p);
