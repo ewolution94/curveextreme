@@ -20,6 +20,9 @@
   import PowerupDisc from './PowerupDisc.svelte';
   import Qr from './Qr.svelte';
   import Tuner from './Tuner.svelte';
+  import ArenaPicker from './ArenaPicker.svelte';
+  import { admin } from '../lib/admin.svelte';
+  import { DEFAULT_ARENA } from '../../shared/arenas.mjs';
 
   const MAX = 10;
   const v = $derived(online.view!);
@@ -33,6 +36,10 @@
   const taken = $derived(new Set(v.members.filter((m) => m.id !== myId()).map((m) => m.colour)));
   const link = $derived(`${location.origin}/${v.code}`);
   const mode = $derived((MODES as any)[s.mode] ?? MODES.basic);
+  const arena = $derived({ ...DEFAULT_ARENA, ...(s.arena ?? {}) });
+  /** The powerup rate under the slider while it's dragged (sent when it's let go). */
+  let rate: number | null = $state(null);
+  const rateText = (v: number) => `×${v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
   const xp = progress().xp;
 
   let copied = $state(false);
@@ -169,6 +176,11 @@
       </div>
 
       <div class="setting">
+        <span class="label">{t('Arena')}</span>
+        <ArenaPicker {arena} editable={host} onchange={(patch) => settings({ arena: { ...arena, ...patch } })} />
+      </div>
+
+      <div class="setting">
         {#if s.type === 'teams'}
           <span class="label">{t('Rounds to win')}</span>
           {#if host}
@@ -208,19 +220,36 @@
               </button>
             {/each}
           </div>
-          <label class="label" for="rate">{t('How often')} <span class="num">×{Number(s.rate).toFixed(1)}</span></label>
-          <input id="rate" type="range" min="0.2" max="4" step="0.1" value={s.rate} disabled={!host}
-            onchange={(e) => settings({ rate: Number((e.target as HTMLInputElement).value) })} />
+          <div class="ratehead"><span class="label">{t('How often')}</span><b class="num">{rateText(rate ?? s.rate)}</b></div>
+          <ewo-slider
+            class="rate"
+            label={t('How often')}
+            min={0.2}
+            max={4}
+            step={0.1}
+            mark={1}
+            value={s.rate}
+            disabled={!host}
+            format={rateText}
+            oninput={(e) => (rate = e.detail.value)}
+            onchange={(e) => {
+              rate = null;
+              settings({ rate: e.detail.value });
+            }}
+          ></ewo-slider>
+          <span class="hint">{t('How often powerups appear: ×1 is the usual pace, ×4 four times as often.')}</span>
         </div>
       {/if}
 
-      <details class="feel">
-        <summary><span class="label">{t('Feel')}</span> <span class="feelname">{s.feel.name}</span></summary>
-        <Tuner feel={s.feel} editable={host} profiles={online.profiles}
-          onPatch={(patch) => settings({ feel: { ...s.feel, ...patch } })}
-          onProfile={(p) => settings({ profile: p })}
-          onSave={(p) => saveProfile({ ...s.feel, name: p })} />
-      </details>
+      {#if admin.on}
+        <details class="feel">
+          <summary><span class="label">{t('Feel')}</span> <span class="feelname">{s.feel.name}</span> <span class="admin">{t('Admin')}</span></summary>
+          <Tuner feel={s.feel} editable={host} profiles={online.profiles}
+            onPatch={(patch) => settings({ feel: { ...s.feel, ...patch } })}
+            onProfile={(p) => settings({ profile: p })}
+            onSave={(p) => saveProfile({ ...s.feel, name: p })} />
+        </details>
+      {/if}
     </section>
 
     <GuideRow />
@@ -449,9 +478,24 @@
   .pu:disabled {
     cursor: default;
   }
-  input[type='range'] {
-    width: 100%;
-    accent-color: var(--accent);
+  .ratehead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .ratehead b {
+    font: 800 18px/1 var(--display);
+    font-stretch: 118%;
+  }
+  .admin {
+    margin-left: auto;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgb(255 161 51 / 0.14);
+    color: var(--ember);
+    font: 700 11px/1.3 var(--body);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
   .feel summary {
     display: flex;

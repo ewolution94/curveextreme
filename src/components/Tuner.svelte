@@ -1,7 +1,8 @@
 <script lang="ts">
-  // The Tune panel: every number of the feel as a dial (the orange notch is the reference as
-  // measured), a profile to start from, and Save as, so a playtest's feel can be kept on the server
-  // and picked again. Changes reach the game from the next round.
+  // The Tune panel (the admin's, src/lib/admin.svelte.ts): every number of the feel on Folio's
+  // slider, the reference as measured marked on it, a profile to start from, and Save as, so a
+  // playtest's feel can be kept on the server and picked again. A dial's value goes out when it's
+  // let go and reaches the game from the next round.
   import { DIALS, CHOICES, CLASSIC } from '../../shared/feel.mjs';
   import { t } from '../lib/i18n.svelte';
 
@@ -16,19 +17,15 @@
   let { feel, editable, profiles, onPatch, onProfile, onSave }: Props = $props();
 
   let saveName = $state('');
+  /** A dial's value while it's dragged. */
   let local = $state<Record<string, number>>({});
-  let timer = 0;
 
   const value = (key: string) => local[key] ?? feel[key];
   const digits = (step: number) => (step >= 1 ? 0 : step >= 0.1 ? 1 : 2);
 
-  function change(key: string, v: number) {
-    local[key] = v;
-    clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      onPatch({ ...local });
-      local = {};
-    }, 150);
+  function done(key: string, v: number) {
+    delete local[key];
+    onPatch({ [key]: v });
   }
 
   function reset() {
@@ -63,11 +60,19 @@
       <div class="dial" class:off={Math.abs(v - ref) > d.step / 2}>
         <label for="dial-{d.key}">{d.label}</label>
         <output class="num">{Number(v).toFixed(digits(d.step))} {d.unit}</output>
-        <div class="track">
-          <input id="dial-{d.key}" type="range" min={d.min} max={d.max} step={d.step} value={v} disabled={!editable}
-            oninput={(e) => change(d.key, Number((e.target as HTMLInputElement).value))} />
-          <span class="notch" style:left="{((ref - d.min) / (d.max - d.min)) * 100}%"></span>
-        </div>
+        <ewo-slider
+          id="dial-{d.key}"
+          label={d.label}
+          min={d.min}
+          max={d.max}
+          step={d.step}
+          mark={ref}
+          unit={d.unit}
+          value={feel[d.key]}
+          disabled={!editable}
+          oninput={(e) => (local[d.key] = e.detail.value)}
+          onchange={(e) => done(d.key, e.detail.value)}
+        ></ewo-slider>
       </div>
     {/each}
   </div>
@@ -117,26 +122,10 @@
   .dial.off output {
     color: var(--accent);
   }
-  .track {
+  .dial ewo-slider {
     grid-column: 1 / -1;
-    position: relative;
-    height: 22px;
-  }
-  .track input {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    margin: 0;
-    accent-color: var(--accent);
-  }
-  .notch {
-    position: absolute;
-    top: -2px;
-    width: 2px;
-    height: 6px;
-    background: #ff9f1c;
-    transform: translateX(-1px);
-    pointer-events: none;
+    --ewo-slider-knob-size: 18px;
+    --ewo-slider-track-height: 5px;
   }
   .actions {
     display: flex;

@@ -1,6 +1,7 @@
 <script lang="ts">
-  // The field: three canvases (trail, top, fog) at the size the settings ask for. Every animation
-  // frame simulates the round up to the clock (runner.ts) and draws it. "Like the original" draws one
+  // The field: four canvases (floor, trail, top, fog) at the size the settings ask for. Every
+  // animation frame simulates the round up to the clock (runner.ts) and draws it. The square arena is
+  // the field itself (a black box in a thin line); the other shapes are drawn on the floor canvas. "Like the original" draws one
   // unit as window height ÷ 922 px, whatever the field (a duel is a smallish square, as in the
   // reference's replays); "fill" uses all the room there is.
   import { onMount, type Snippet } from 'svelte';
@@ -23,12 +24,14 @@
 
   const REFERENCE_UNITS = 922;
   let stage: HTMLDivElement;
+  let floorCv: HTMLCanvasElement;
   let trailCv: HTMLCanvasElement;
   let topCv: HTMLCanvasElement;
   let fogCv: HTMLCanvasElement;
   let cssW = $state(300);
   let cssH = $state(300);
   let open = $state(false);
+  let shaped = $state(false);
   const hug = $derived(reserve >= 0);
 
   // a crash bursts where it happened, in the curve's colour
@@ -43,7 +46,7 @@
   });
 
   onMount(() => {
-    const ren = (renderer = new Renderer(trailCv, topCv, fogCv));
+    const ren = (renderer = new Renderer(floorCv, trailCv, topCv, fogCv));
     let laidW = 0, laidH = 0, laidBox = '';
     const coarse = matchMedia('(pointer: coarse)');
 
@@ -74,8 +77,10 @@
       ren.frame(runner, { now, T, colourOf });
       // Open Walls (blue, everyone): the edge turns dashed while it runs
       let wraps = false;
-      for (const c of runner.round.s.curves) if (c.alive && c.effects.some((e: any) => e.kind === 'openWalls')) wraps = true;
+      for (const c of runner.round.s.curves) if (c.alive && c.effects.some((e: any) => e.kind === 'openWalls' || e.kind === 'greenOpenWalls')) wraps = true;
       if (wraps !== open) open = wraps;
+      const isShaped = runner.round.floor.shape !== 'square';
+      if (isShaped !== shaped) shaped = isShaped;
     };
     raf = requestAnimationFrame(frame);
     const ro = new ResizeObserver(() => layout(true));
@@ -90,7 +95,8 @@
 </script>
 
 <div class="stage" class:hug bind:this={stage} style:width={hug ? `${cssW}px` : null} style:height={hug ? `${cssH}px` : null}>
-  <div class="field" class:open style:width="{cssW}px" style:height="{cssH}px">
+  <div class="field" class:open class:shaped style:width="{cssW}px" style:height="{cssH}px">
+    <canvas bind:this={floorCv}></canvas>
     <canvas bind:this={trailCv}></canvas>
     <canvas bind:this={topCv}></canvas>
     <canvas bind:this={fogCv}></canvas>
@@ -120,6 +126,11 @@
   .field.open {
     outline-style: dashed;
     outline-color: #7fa9ff;
+  }
+  /* a shaped arena draws its own floor and edge (render.ts) */
+  .field.shaped {
+    background: transparent;
+    outline: none;
   }
   canvas {
     position: absolute;

@@ -21,9 +21,14 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
   - `shared/powerups.mjs`: the 25 powerups (durations, spawn weights, colour = who they hit, what they
     multiply or do). The actions' own numbers (split angle, safe zone, closing walls) are in `ACTIONS`.
   - `shared/modes.mjs`: the modes (which powerups, how often, which feel).
-- **The Tune panel** (lobby → Feel, or Tune in a game, host only): every feel number as a dial, the
-  measured value as an orange notch; changes apply from the next round. *Save as* keeps a profile on
-  the server (`$DATA_DIR/profiles.json`) for the next room and the shared keyboard.
+  - `shared/arenas.mjs`: the arenas: the floor's shape (Square as measured, Circle, Hexagon, Ring with
+    its island, Cross), its size, and Pillars and patches of Ice and Mud placed from the round's seed;
+    every other shape gets a field whose floor has the measured square's room.
+- **The Tune panel** (lobby → Feel, or Tune in a game; the host, on a device with the admin code):
+  every feel number on Folio's slider, the measured value marked; changes apply from the next round.
+  *Save as* keeps a profile on the server (`$DATA_DIR/profiles.json`) for the next room and the
+  shared keyboard. The admin code goes in Settings → Admin (`src/lib/admin.svelte.ts`, kept as a hash;
+  a door, not a lock: nothing on the server checks it).
 - **Netcode: inputs, not positions** (`shared/protocol.mjs`). Getting into a room is an HTTP seat
   reservation (`POST /api/rooms`, `POST /api/rooms/CODE/seats`), then the room's WebSocket with the
   session it gave (`/ws?session=…`, a dependency-free server in `server/ws.mjs`), binary `[type,

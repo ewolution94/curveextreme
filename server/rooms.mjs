@@ -19,6 +19,7 @@ import { BUILT_IN, cleanFeel } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { POWERUPS, POWERUP_KINDS } from '../shared/powerups.mjs';
 import { isColour, freeColour } from '../shared/colours.mjs';
+import { DEFAULT_ARENA, cleanArena } from '../shared/arenas.mjs';
 import { encode, decode } from '../shared/wire.mjs';
 import { UP, DOWN, NET, SUBS, toAction, fromAction } from '../shared/protocol.mjs';
 import { cleanAvatar } from './avatar.mjs';
@@ -45,6 +46,7 @@ function defaultSettings() {
     powerups: [...MODES.basic.powerups], // used when the mode is Custom
     rate: 1, // Custom: how often powerups come
     feel: { ...BUILT_IN.classic },
+    arena: { ...DEFAULT_ARENA }, // the floor's shape and size, pillars, ice and mud (shared/arenas.mjs)
   };
 }
 
@@ -333,7 +335,7 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       }
     }
 
-    /** The host's settings. A new feel or mode reaches a running game at its next round. */
+    /** The host's settings. A new feel, mode or arena reaches a running game at its next round. */
     settingsFrom(conn, patch) {
       if (conn.id !== this.host || !patch || typeof patch !== 'object') return;
       const s = this.settings;
@@ -353,11 +355,12 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       if (Array.isArray(patch.powerups)) s.powerups = patch.powerups.filter((k) => POWERUPS[k]);
       if (Number.isFinite(patch.rate)) s.rate = Math.max(0.1, Math.min(5, patch.rate));
       if (patch.feel && typeof patch.feel === 'object') s.feel = cleanFeel(patch.feel, s.feel);
+      if (patch.arena && typeof patch.arena === 'object') s.arena = cleanArena(patch.arena, s.arena);
       if (typeof patch.profile === 'string') {
         const p = profiles.get(patch.profile);
         if (p) s.feel = { ...p };
       }
-      this.game?.match.retune({ feel: s.feel, mode: this.modeData() });
+      this.game?.match.retune({ feel: s.feel, mode: this.modeData(), arena: s.arena });
       this.broadcast(DOWN.UPDATE, { view: this.view() });
     }
 
@@ -379,6 +382,7 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
         rules: { type: this.settings.type, target: this.settings.target, teamTarget: this.settings.teamTarget },
         feel: this.settings.feel,
         mode: this.modeData(),
+        arena: this.settings.arena,
         seed: (Math.random() * 2 ** 32) >>> 0,
       });
       this.game = {

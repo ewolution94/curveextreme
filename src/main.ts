@@ -10,6 +10,7 @@ import '../vendor/ewo/elements/switch.js';
 import '../vendor/ewo/elements/emblem.js';
 import '../vendor/ewo/elements/emblem-maker.js';
 import '../vendor/ewo/elements/connection.js';
+import '../vendor/ewo/elements/slider.js';
 import { mount } from 'svelte';
 import App from './App.svelte';
 // Every tap answers on a phone, the games' lively way (Folio's pressFeedback, plans/mobile-touch.md).

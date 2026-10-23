@@ -17,6 +17,9 @@
   import Arena from './Arena.svelte';
   import Avatar from './Avatar.svelte';
   import Settings from './Settings.svelte';
+  import ArenaPicker from './ArenaPicker.svelte';
+  import { admin } from '../lib/admin.svelte';
+  import { DEFAULT_ARENA } from '../../shared/arenas.mjs';
 
   let { onExit, playing = $bindable(false) }: { onExit: () => void; playing?: boolean } = $props();
 
@@ -26,6 +29,7 @@
   let seats = $state<LocalSeat[]>([0, 1].map((i) => seat(i)));
   let mode = $state('basic');
   let target = $state(0);
+  let arena = $state<{ shape: string; size: string; pillars: boolean; patches: boolean }>({ ...DEFAULT_ARENA });
   let profile = $state('');
   let profiles = $state<{ builtIn: any[]; saved: any[] }>({ builtIn: Object.values(BUILT_IN), saved: [] });
   let binding = $state<{ seat: number; step: 0 | 1 } | null>(null);
@@ -72,8 +76,8 @@
 
   function begin() {
     const all = [...profiles.builtIn, ...profiles.saved];
-    const feel = profile ? all.find((p) => p.name === profile) : undefined;
-    const g = new LocalGame($state.snapshot(seats) as Seat[], { mode, feel, target });
+    const feel = admin.on && profile ? all.find((p) => p.name === profile) : undefined;
+    const g = new LocalGame($state.snapshot(seats) as Seat[], { mode, feel, target, arena: $state.snapshot(arena) });
     game = g;
     g.start();
   }
@@ -197,12 +201,18 @@
         </ewo-segmented>
       </div>
       <div class="setting">
-        <label class="label" for="lprofile">{t('Feel')}</label>
-        <select id="lprofile" class="field-input" bind:value={profile}>
-          <option value="">{BUILT_IN[MODES[mode as keyof typeof MODES].feel as keyof typeof BUILT_IN].name}</option>
-          {#each [...profiles.builtIn, ...profiles.saved] as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
-        </select>
+        <span class="label">{t('Arena')}</span>
+        <ArenaPicker {arena} onchange={(patch) => (arena = { ...arena, ...patch })} />
       </div>
+      {#if admin.on}
+        <div class="setting">
+          <label class="label" for="lprofile">{t('Feel')}</label>
+          <select id="lprofile" class="field-input" bind:value={profile}>
+            <option value="">{BUILT_IN[MODES[mode as keyof typeof MODES].feel as keyof typeof BUILT_IN].name}</option>
+            {#each [...profiles.builtIn, ...profiles.saved] as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+          </select>
+        </div>
+      {/if}
     </section>
 
     <div class="go">

@@ -11,9 +11,9 @@
 // (feel.mjs), the powerup table (powerups.mjs) and the mode (modes.mjs).
 
 import { POWERUPS, ACTIONS } from './powerups.mjs';
-import { fieldFor } from './feel.mjs';
 import { SUBS } from './protocol.mjs';
 import { sin, cos, norm, dist2, TAU, PI, HALF_PI } from './dmath.mjs';
+import { ARENA_NUMBERS, DEFAULT_ARENA, Floor, arenaField, cleanArena, furnish, hitsPillar, patchAt } from './arenas.mjs';
 
 /** The classic target: 10 points per opponent. */
 export const targetFor = (players) => 10 * Math.max(1, players - 1);
@@ -88,17 +88,12 @@ export function wrapInto(c, rect) {
   return jumped;
 }
 
-/** The walls at frame k (fractional too) while they close. */
-export function wallsAt(walls, k) {
-  if (!walls.closing) return walls.rect;
-  const { from, to, k0, k1 } = walls.closing;
+/** The walls' scale at frame k (fractional too): 1, or less while Closing Walls shrinks the floor. */
+export function wallScale(walls, k) {
+  if (!walls.closing) return walls.scale;
+  const { s0, s1, k0, k1 } = walls.closing;
   const t = Math.min(1, Math.max(0, (k - k0) / Math.max(1, k1 - k0)));
-  return {
-    x0: from.x0 + (to.x0 - from.x0) * t,
-    y0: from.y0 + (to.y0 - from.y0) * t,
-    x1: from.x1 + (to.x1 - from.x1) * t,
-    y1: from.y1 + (to.y1 - from.y1) * t,
-  };
+  return s0 + (s1 - s0) * t;
 }
 
 const CELL = 12;
@@ -145,9 +140,9 @@ function copyState(s) {
 }
 
 /**
- * One round. `start` (Match.nextRound): { no, seed, W, H, feel, mode: { rate, powerups }, type,
- * players: [{ id, team }], points, teamWins, target, teamTarget }. Players are numbered by their
- * place in `players`; actions name them by that number.
+ * One round. `start` (Match.nextRound): { no, seed, W, H, feel, mode: { rate, powerups }, arena,
+ * type, players: [{ id, team }], points, teamWins, target, teamTarget }. Players are numbered by
+ * their place in `players`; actions name them by that number.
  */
 export class Round {
   constructor(start) {
@@ -179,7 +174,7 @@ export class Round {
       curves: [],
       powerups: [],
       zones: [],
-      walls: { rect: { x0: 0, y0: 0, x1: this.W, y1: this.H }, closing: null },
+      walls: { scale: 1, closing: null },
       movingUntil: 0,
       darkUntil: 0,
       lingerUntil: 0,
@@ -190,13 +185,23 @@ export class Round {
       dist: new Array(n).fill(0),
       trail: newTrail(),
     };
-    // spawns: a margin from the walls, apart from each other, random headings
+    // the arena: its floor, and the pillars and patches on it (from the seed, before the spawns)
+    this.arena = cleanArena(start.arena ?? DEFAULT_ARENA);
+    this.floor = new Floor(this.arena, this.W, this.H);
+    const things = furnish(this.arena, this.floor, n, () => this.rand());
+    this.pillars = things.pillars;
+    this.patches = things.patches;
+    // spawns: a margin from the walls, on the floor and clear of the pillars, apart from each other,
+    // random headings
     const m = feel.spawnMargin, W = this.W, H = this.H;
+    const edge = (m * Math.min(W, H)) / 2;
     for (let p = 0; p < n; p++) {
       let x = 0, y = 0;
       for (let tries = 0; tries < 40; tries++) {
         x = W * m + this.rand() * W * (1 - 2 * m);
         y = H * m + this.rand() * H * (1 - 2 * m);
+        if (!this.floor.inside(x, y, edge)) continue;
+        if (hitsPillar(this.pillars, x, y, ARENA_NUMBERS.pillarClear)) continue;
         if (this.s.curves.every((c) => dist2(c.x, c.y, x, y) >= feel.spawnApart * feel.spawnApart)) break;
       }
       this.s.curves.push(this.newCurve(p, x, y, this.rand() * TAU - PI));
@@ -226,8 +231,41 @@ export class Round {
     return this.s.trail;
   }
 
+  /** A curve's numbers now: its effects, and the patch it's on (ice turns wider, mud is slower). */
   motion(c) {
-    return motionOf(c.effects, this.feel);
+    const m = motionOf(c.effects, this.feel);
+    if (this.patches.length) {
+      const p = patchAt(this.patches, c.x, c.y);
+      if (p?.kind === 'ice') m.r *= ARENA_NUMBERS.ice.radius;
+      else if (p?.kind === 'mud') m.v *= ARENA_NUMBERS.mud.speed;
+    }
+    return m;
+  }
+
+  /** The walls' scale at frame k. */
+  scaleAt(k) {
+    return wallScale(this.s.walls, k);
+  }
+
+  /** The floor's bounding box at frame k. */
+  rectAt(k) {
+    return this.floor.rect(this.scaleAt(k));
+  }
+
+  /**
+   * Through an open wall: on the square to the other side (the reference's), on the other shapes to
+   * the point across the middle from where the curve left (each shape is symmetric about its
+   * middle, and the heading that pointed out points in there). Returns true if it went through.
+   */
+  wrap(c, px, py, scale) {
+    const f = this.floor;
+    if (f.shape === 'square') return wrapInto(c, f.rect(scale));
+    if (f.inside(c.x, c.y, 0, scale)) return false;
+    const x = 2 * f.cx - px, y = 2 * f.cy - py;
+    if (!f.inside(x, y, 0, scale)) return false;
+    c.x = x;
+    c.y = y;
+    return true;
   }
 
   /** A player is in the round while one of their curves is. */
@@ -278,7 +316,8 @@ export class Round {
     // effects and zones run out
     for (const c of s.curves) if (c.effects.length) c.effects = c.effects.filter((e) => e.until > k);
     if (s.zones.length) s.zones = s.zones.filter((z) => z.until > k);
-    const rect = wallsAt(s.walls, k);
+    const scale = this.scaleAt(k);
+    const rect = this.floor.rect(scale);
 
     // each player's actions this frame
     const mine = new Array(this.n);
@@ -288,7 +327,7 @@ export class Round {
     if (s.phase !== 'still') {
       for (const c of s.curves) {
         if (!c.alive) continue;
-        this.frameOf(c, mine[c.p] ?? [], rect, k, ev);
+        this.frameOf(c, mine[c.p] ?? [], scale, k, ev);
       }
     }
     for (let p = 0; p < this.n; p++) {
@@ -328,13 +367,22 @@ export class Round {
     if (k < s.movingUntil && s.powerups.length) {
       const speed = ACTIONS.moving.speed * this.dt;
       const pr = feel.powerupRadius;
+      const plain = this.floor.shape === 'square' && !this.pillars.length;
       for (const p of s.powerups) {
         p.x += p.vx * speed;
         p.y += p.vy * speed;
-        if (p.x < rect.x0 + pr || p.x > rect.x1 - pr) p.vx *= -1;
-        if (p.y < rect.y0 + pr || p.y > rect.y1 - pr) p.vy *= -1;
-        p.x = Math.min(rect.x1 - pr, Math.max(rect.x0 + pr, p.x));
-        p.y = Math.min(rect.y1 - pr, Math.max(rect.y0 + pr, p.y));
+        if (plain) {
+          if (p.x < rect.x0 + pr || p.x > rect.x1 - pr) p.vx *= -1;
+          if (p.y < rect.y0 + pr || p.y > rect.y1 - pr) p.vy *= -1;
+          p.x = Math.min(rect.x1 - pr, Math.max(rect.x0 + pr, p.x));
+          p.y = Math.min(rect.y1 - pr, Math.max(rect.y0 + pr, p.y));
+        } else if (!this.floor.inside(p.x, p.y, pr, scale) || hitsPillar(this.pillars, p.x, p.y, pr)) {
+          // off the floor or into a pillar: back, and the other way
+          p.x -= p.vx * speed;
+          p.y -= p.vy * speed;
+          p.vx *= -1;
+          p.vy *= -1;
+        }
       }
     }
 
@@ -343,7 +391,7 @@ export class Round {
   }
 
   /** One curve through one frame: steer (piece by piece between the actions), wrap, gap, collide. */
-  frameOf(c, acts, rect, k, ev) {
+  frameOf(c, acts, scale, k, ev) {
     const s = this.s;
     const feel = this.feel;
     const m = this.motion(c);
@@ -366,15 +414,15 @@ export class Round {
 
     if (s.phase === 'free') {
       const walls = feel.freeWalls ?? 'off';
-      if (walls === 'wrap' && wrapInto(c, rect)) jump = true;
-      if (walls === 'solid' && (c.x < rect.x0 || c.y < rect.y0 || c.x > rect.x1 || c.y > rect.y1)) {
+      if (walls === 'wrap' && this.wrap(c, px, py, scale)) jump = true;
+      if (walls === 'solid' && (!this.floor.inside(c.x, c.y, 0, scale) || hitsPillar(this.pillars, c.x, c.y, 0))) {
         c.alive = false;
         ev.push({ e: 'die', cid: c.id, p: c.p, x: c.x, y: c.y, by: null });
       }
       return;
     }
     s.dist[c.p] += len;
-    if (m.wrap && wrapInto(c, rect)) jump = true;
+    if (m.wrap && this.wrap(c, px, py, scale)) jump = true;
 
     // gaps: a memoryless chance per unit of line, after the shortest line
     let draw = true;
@@ -393,7 +441,8 @@ export class Round {
     const hr = m.hit / 2;
     let dead = false, by = null;
     if (!safe) {
-      if (!m.wrap && (c.x - hr < rect.x0 || c.y - hr < rect.y0 || c.x + hr > rect.x1 || c.y + hr > rect.y1)) dead = true;
+      if (!m.wrap && !this.floor.inside(c.x, c.y, hr, scale)) dead = true;
+      else if (this.pillars.length && hitsPillar(this.pillars, c.x, c.y, hr)) dead = true;
       else if (!m.fly) {
         const hit = this.hitLine(c, hr, len, k);
         if (hit >= 0) {
@@ -477,10 +526,12 @@ export class Round {
       }
     }
     const pr = this.feel.powerupRadius + 4;
+    const scale = this.scaleAt(k);
     let x = 0, y = 0;
     for (let tries = 0; tries < 12; tries++) {
       x = rect.x0 + pr + this.rand() * Math.max(1, rect.x1 - rect.x0 - 2 * pr);
       y = rect.y0 + pr + this.rand() * Math.max(1, rect.y1 - rect.y0 - 2 * pr);
+      if (!this.floor.inside(x, y, pr, scale) || hitsPillar(this.pillars, x, y, pr)) continue;
       if (s.curves.every((c) => !c.alive || dist2(c.x, c.y, x, y) > 1600)) break;
     }
     const p = { id: s.ids++, kind, x, y, vx: 0, vy: 0 };
@@ -569,12 +620,8 @@ export class Round {
         s.zones.push({ id: s.ids++, x: pu.x, y: pu.y, r: ACTIONS.noDraw.radius, until });
         break;
       case 'closeWalls': {
-        const from = wallsAt(s.walls, k);
-        const f = ACTIONS.closeWalls.to;
-        const cx = (from.x0 + from.x1) / 2, cy = (from.y0 + from.y1) / 2;
-        const hw = ((from.x1 - from.x0) / 2) * f, hh = ((from.y1 - from.y0) / 2) * f;
-        const to = { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
-        s.walls = { rect: s.walls.rect, closing: { from, to, k0: k, k1: k + Math.round(ACTIONS.closeWalls.seconds * this.rate) } };
+        const s0 = this.scaleAt(k);
+        s.walls = { scale: 1, closing: { s0, s1: s0 * ACTIONS.closeWalls.to, k0: k, k1: k + Math.round(ACTIONS.closeWalls.seconds * this.rate) } };
         break;
       }
       case 'moving':
@@ -660,9 +707,9 @@ export class Round {
 export class Match {
   /**
    * @param {{ players: {id:string,name:string,colour:string,team?:number}[], rules?: object,
-   *   feel: object, mode: { rate:number, powerups:string[] }, seed?: number }} o
+   *   feel: object, mode: { rate:number, powerups:string[] }, arena?: object, seed?: number }} o
    */
-  constructor({ players, rules = {}, feel, mode, seed = 1 }) {
+  constructor({ players, rules = {}, feel, mode, arena = DEFAULT_ARENA, seed = 1 }) {
     this.players = players.map((p) => ({ id: p.id, name: p.name, colour: p.colour, team: p.team ?? 0 }));
     const teams = rules.type === 'teams' && new Set(this.players.map((p) => p.team)).size > 1;
     this.rules = {
@@ -673,6 +720,7 @@ export class Match {
     };
     this.feel = feel;
     this.mode = mode;
+    this.arena = cleanArena(arena);
     this.seed = seed >>> 0;
     this.points = Object.fromEntries(this.players.map((p) => [p.id, 0]));
     this.teamWins = {};
@@ -682,16 +730,17 @@ export class Match {
     this.winner = null;
   }
 
-  /** For the next round: a new feel or mode (the Tune panel, the host's settings). */
-  retune({ feel, mode } = {}) {
+  /** For the next round: a new feel, mode or arena (the Tune panel, the host's settings). */
+  retune({ feel, mode, arena } = {}) {
     if (feel) this.feel = feel;
     if (mode) this.mode = mode;
+    if (arena) this.arena = cleanArena(arena);
   }
 
   /** The next round's start: everything a page needs to simulate it, the seed included. */
   nextRound() {
     this.roundNo++;
-    const [W, H] = fieldFor(this.feel, this.players.length);
+    const [W, H] = arenaField(this.feel, this.players.length, this.arena);
     // each round its own seed, so a page joining later needs only that round's start
     this.seed = (Math.imul(this.seed ^ (this.seed >>> 16), 0x45d9f3b) + this.roundNo) >>> 0;
     return {
@@ -700,6 +749,7 @@ export class Match {
       W, H,
       feel: this.feel,
       mode: { rate: this.mode.rate, powerups: [...this.mode.powerups] },
+      arena: { ...this.arena },
       type: this.rules.type,
       players: this.players.map((p) => ({ id: p.id, team: p.team })),
       points: { ...this.points },

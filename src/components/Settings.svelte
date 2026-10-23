@@ -12,6 +12,7 @@
   import { i18n, setLanguage, systemLang, t, type LangChoice } from '../lib/i18n.svelte';
   import { prefs, savePrefs, type FieldSize } from '../lib/prefs.svelte';
   import { sfx, unlockAudio } from '../lib/sound';
+  import { admin, lock, unlock } from '../lib/admin.svelte';
   import { waitAt } from '../lib/waits';
 
   type Game = {
@@ -36,12 +37,22 @@
 
   let sure: 'end' | 'leave' | 'local' | null = $state(null);
   let error = $state('');
+  let code = $state('');
+  let codeWrong = $state(false);
   $effect(() => {
     if (!open) {
       sure = null;
       error = '';
+      code = '';
+      codeWrong = false;
     }
   });
+
+  function tryCode(event: SubmitEvent) {
+    event.preventDefault();
+    codeWrong = !unlock(code);
+    if (!codeWrong) code = '';
+  }
 
   async function end(from: Event) {
     error = '';
@@ -150,6 +161,21 @@
         </ewo-segmented>
       </div>
     </section>
+    <section class="admin">
+      <h3 class="label">{t('Admin')}</h3>
+      {#if admin.on}
+        <div class="row">
+          <span class="name">{t('Admin tools are on')}<small>{t('The Tune panel and the feel in the room show on this device.')}</small></span>
+          <button class="btn small" type="button" onclick={lock}>{t('Turn off')}</button>
+        </div>
+      {:else}
+        <form class="code" onsubmit={tryCode}>
+          <input class="input" bind:value={code} oninput={() => (codeWrong = false)} placeholder={t('Admin code')} aria-label={t('Admin code')} autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button class="btn small" type="submit" disabled={!code.trim()}>{t('Unlock')}</button>
+        </form>
+        {#if codeWrong}<p class="error" role="alert">{t('That’s not the code.')}</p>{/if}
+      {/if}
+    </section>
   {/if}
 </ewo-sheet>
 
@@ -196,6 +222,16 @@
   ewo-segmented {
     flex: none;
     width: min(300px, 62%);
+  }
+  .code {
+    display: flex;
+    gap: 8px;
+  }
+  .code .input {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    font-size: 16px;
   }
   @media (max-width: 480px) {
     .row:has(ewo-segmented) {

@@ -258,6 +258,22 @@ select.field-input {
   border-radius: 12px;
 }
 
+/* Folio's slider (Randomiser's, vendor/ewo) in look A: the rail a curve's line in Ultraviolet, the
+   knob its head with the black of the field around it, the default marked in Ember. */
+ewo-slider {
+  --ewo-slider-knob-size: 22px;
+  --ewo-slider-track-height: 6px;
+  --ewo-slider-fill: var(--accent);
+  --ewo-slider-track: rgb(255 255 255 / 0.12);
+  --ewo-slider-knob: var(--accent);
+  --ewo-slider-knob-shadow: 0 0 0 3px var(--ground), 0 0 0 4.5px rgb(255 255 255 / 0.5), 0 3px 8px rgb(0 0 0 / 0.6);
+  --ewo-slider-mark: var(--ember);
+  --ewo-slider-tick: rgb(255 255 255 / 0.28);
+  --ewo-slider-bubble: var(--ink);
+  --ewo-slider-bubble-ink: var(--ground);
+  color: var(--ink);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

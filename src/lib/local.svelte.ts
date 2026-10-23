@@ -25,7 +25,7 @@ export class LocalGame {
   private unbind: () => void = () => {};
   private timer = 0;
 
-  constructor(seats: Seat[], opts: { mode: string; feel?: any; target?: number }) {
+  constructor(seats: Seat[], opts: { mode: string; feel?: any; target?: number; arena?: any }) {
     const mode = MODES[opts.mode as keyof typeof MODES] ?? MODES.basic;
     const feel = opts.feel ?? BUILT_IN[mode.feel as keyof typeof BUILT_IN];
     this.seats = seats;
@@ -35,6 +35,7 @@ export class LocalGame {
       rules: { type: 'ffa', target: opts.target ?? 0 },
       feel,
       mode: { rate: mode.rate, powerups: mode.powerups },
+      arena: opts.arena,
       seed: (Math.random() * 2 ** 32) >>> 0,
     });
     this.steerings = seats.map(

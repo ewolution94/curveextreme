@@ -10,6 +10,7 @@
   import Arena from './Arena.svelte';
   import Tuner from './Tuner.svelte';
   import Settings from './Settings.svelte';
+  import { admin } from '../lib/admin.svelte';
 
   const v = $derived(online.view!);
   const runner = $derived.by(() => {
@@ -65,14 +66,14 @@
 {#if runner}
   <Arena {runner} version={online.version} {players} me={myId()} code={v.code} {keys} {banner} bind:area>
     {#snippet actions()}
-      {#if isHost()}
+      {#if isHost() && admin.on}
         <button class="btn small ghost" type="button" onclick={() => (tuneOpen = !tuneOpen)}>{t('Tune')}</button>
       {/if}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <ewo-settings-button bind:this={settingsButton} onclick={() => (settingsOpen = true)}></ewo-settings-button>
     {/snippet}
 
-    {#if tuneOpen && isHost()}
+    {#if tuneOpen && isHost() && admin.on}
       <div class="drawer panel">
         <Tuner feel={v.settings.feel} editable profiles={online.profiles}
           onPatch={(patch) => settings({ feel: { ...v.settings.feel, ...patch } })}

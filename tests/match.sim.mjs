@@ -1,5 +1,5 @@
-// Whole matches played out by random drivers through the rounds' timelines: every powerup, ten
-// players, many seeds, actions mid-frame. Checks that nothing throws and the rules hold (points only
+// Whole matches played out by random drivers through the rounds' timelines: every powerup, every
+// arena, ten players, many seeds, actions mid-frame. Checks that nothing throws and the rules hold (points only
 // go up, a decided match has a two-point lead, every round ends, positions stay numbers), and that a
 // copy fed the same actions late (rewinding) ends every round in the same state. Local only
 // (npm run test:sim), not in CI: the family's rule for games.
@@ -9,6 +9,7 @@ import { Match } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
 import { CLASSIC, GSPP } from '../shared/feel.mjs';
 import { POWERUP_KINDS } from '../shared/powerups.mjs';
+import { SHAPES } from '../shared/arenas.mjs';
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -22,7 +23,9 @@ function rng(seed) {
 
 function play(seed, n, feel, opts = {}) {
   const players = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}`, colour: '#fff', team: opts.teams ? i % 2 : 0 }));
-  const m = new Match({ players, rules: { type: opts.teams ? 'teams' : 'ffa', target: opts.target ?? 0, teamTarget: 3 }, feel, mode: { rate: 3, powerups: [...POWERUP_KINDS] }, seed });
+  // every arena in turn: the shapes, with pillars, ice and mud on every other seed
+  const arena = { shape: SHAPES[seed % SHAPES.length], size: ['small', 'normal', 'large'][seed % 3], pillars: seed % 2 === 1, patches: seed % 4 < 2 };
+  const m = new Match({ players, rules: { type: opts.teams ? 'teams' : 'ffa', target: opts.target ?? 0, teamTarget: 3 }, feel, mode: { rate: 3, powerups: [...POWERUP_KINDS] }, arena, seed });
   const drive = rng(seed * 7 + 1);
   let rounds = 0, frames = 0;
   const kinds = new Set();
@@ -43,7 +46,7 @@ function play(seed, n, feel, opts = {}) {
         const c = r.s.curves.find((x) => x.p === p && x.alive);
         if (c && r.phase !== 'still') {
           const margin = 45;
-          if (c.x < margin || c.y < margin || c.x > r.W - margin || c.y > r.H - margin) {
+          if (!r.floor.inside(c.x, c.y, margin)) {
             const to = Math.atan2(r.H / 2 - c.y, r.W / 2 - c.x);
             dir = Math.atan2(Math.sin(to - c.a), Math.cos(to - c.a)) > 0 ? 1 : -1;
           }

@@ -1,12 +1,14 @@
-// Draws a round as this page simulates it (runner.ts) on three canvases: the trail (the lines, each
-// piece drawn once when it's old enough that no late action can change it), the top layer (the
-// newest pieces, the heads between frames, powerups, zones, walls, arrows, bursts, effect rings,
-// redrawn every frame) and the fog (darkness). A rewind deeper than the trail's settled part draws
-// the trail again from the round's lines. The look comes from a Theme, so a new look is a new theme
-// object, not new drawing code.
+// Draws a round as this page simulates it (runner.ts) on four canvases: the floor (the arena's
+// shape, its ice and mud, its pillars; drawn once a round), the trail (the lines, each piece drawn
+// once when it's old enough that no late action can change it), the top layer (the newest pieces,
+// the heads between frames, powerups, zones, the shape's edge and closing walls, arrows, bursts,
+// effect rings, redrawn every frame) and the fog (darkness). A rewind deeper than the trail's settled
+// part draws the trail again from the round's lines. The look comes from a Theme, so a new look is a
+// new theme object, not new drawing code.
 
 import { POWERUPS, ACTIONS } from '../../shared/powerups.mjs';
-import { wallsAt, wrapInto } from '../../shared/engine.mjs';
+import { wrapInto } from '../../shared/engine.mjs';
+import { ARENA_NUMBERS } from '../../shared/arenas.mjs';
 import { drawPowerup } from './icons';
 import type { RoundRunner } from './runner';
 
@@ -18,6 +20,13 @@ export type Theme = {
   zoneEdge: string;
   ring: string;
   veil: string; // outside closing walls
+  pillar: string;
+  pillarEdge: string;
+  ice: string;
+  iceEdge: string;
+  mud: string;
+  mudEdge: string;
+  open: string; // the edge while Open Walls runs
 };
 
 export const CLASSIC_THEME: Theme = {
@@ -28,7 +37,32 @@ export const CLASSIC_THEME: Theme = {
   zoneEdge: 'rgba(110, 160, 255, 0.75)',
   ring: 'rgba(255, 255, 255, 0.85)',
   veil: 'rgba(0, 0, 0, 0.72)',
+  pillar: '#1d1d21',
+  pillarEdge: '#e9e9ea',
+  ice: 'rgba(150, 210, 255, 0.14)',
+  iceEdge: 'rgba(170, 220, 255, 0.55)',
+  mud: 'rgba(122, 82, 44, 0.42)',
+  mudEdge: 'rgba(176, 124, 72, 0.7)',
+  open: '#7fa9ff',
 };
+
+/** The floor's outline at scale s (a ring's island as a hole: fill it with 'evenodd'). */
+export function shapePath(g: CanvasRenderingContext2D, floor: any, k: number, s = 1) {
+  g.beginPath();
+  if (floor.shape === 'circle' || floor.shape === 'ring') {
+    g.arc(floor.cx * k, floor.cy * k, s * floor.R * k, 0, Math.PI * 2);
+    if (floor.shape === 'ring') {
+      const r = s * ARENA_NUMBERS.island * floor.R * k;
+      g.moveTo(floor.cx * k + r, floor.cy * k);
+      g.arc(floor.cx * k, floor.cy * k, r, 0, Math.PI * 2, true);
+    }
+    return;
+  }
+  const pts = floor.polygon(s);
+  g.moveTo(pts[0][0] * k, pts[0][1] * k);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0] * k, pts[i][1] * k);
+  g.closePath();
+}
 
 /** Frames a line piece waits on the top layer before it goes on the trail for good. */
 const SETTLE = 12;
@@ -43,6 +77,7 @@ export type ShowOptions = {
 type Head = { c: any; x: number; y: number; a: number; own: boolean };
 
 export class Renderer {
+  floor: CanvasRenderingContext2D;
   trail: CanvasRenderingContext2D;
   top: CanvasRenderingContext2D;
   fog: CanvasRenderingContext2D;
@@ -57,8 +92,10 @@ export class Renderer {
   private drawnLen = 0;
   private drawnFrame = -1;
   private lastOf = new Map<number, number>(); // each curve's last point on the trail canvas
+  private floorOf: RoundRunner | null = null; // whose arena is on the floor canvas
 
-  constructor(trail: HTMLCanvasElement, top: HTMLCanvasElement, fog: HTMLCanvasElement) {
+  constructor(floor: HTMLCanvasElement, trail: HTMLCanvasElement, top: HTMLCanvasElement, fog: HTMLCanvasElement) {
+    this.floor = floor.getContext('2d')!;
     this.trail = trail.getContext('2d')!;
     this.top = top.getContext('2d')!;
     this.fog = fog.getContext('2d')!;
@@ -67,7 +104,7 @@ export class Renderer {
   /** The canvases' size in CSS pixels for a field of W × H units. */
   resize(W: number, cssW: number, cssH: number) {
     this.dpr = Math.min(3, window.devicePixelRatio || 1);
-    for (const g of [this.trail, this.top, this.fog]) {
+    for (const g of [this.floor, this.trail, this.top, this.fog]) {
       g.canvas.style.width = `${cssW}px`;
       g.canvas.style.height = `${cssH}px`;
       g.canvas.width = Math.max(1, Math.round(cssW * this.dpr));
@@ -75,6 +112,50 @@ export class Renderer {
     }
     this.scale = this.trail.canvas.width / W;
     this.drawnTrail = null; // drawn again at the new size
+    this.floorOf = null;
+  }
+
+  /** The arena's floor: the shape (the square's is the field itself), ice and mud, pillars. */
+  private drawFloor(runner: RoundRunner) {
+    const g = this.floor;
+    const round = runner.round;
+    const k = this.scale;
+    const t = this.theme;
+    g.clearRect(0, 0, g.canvas.width, g.canvas.height);
+    if (round.floor.shape !== 'square') {
+      g.fillStyle = t.field;
+      shapePath(g, round.floor, k);
+      g.fill('evenodd');
+    }
+    // ice and mud stay on the floor: a patch at the edge is cut by it
+    g.save();
+    if (round.floor.shape !== 'square') {
+      shapePath(g, round.floor, k);
+      g.clip('evenodd');
+    }
+    for (const p of round.patches) {
+      g.fillStyle = p.kind === 'ice' ? t.ice : t.mud;
+      g.strokeStyle = p.kind === 'ice' ? t.iceEdge : t.mudEdge;
+      g.lineWidth = 1.2 * this.dpr;
+      g.setLineDash(p.kind === 'ice' ? [4 * this.dpr, 4 * this.dpr] : []);
+      g.beginPath();
+      g.arc(p.x * k, p.y * k, p.r * k, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.setLineDash([]);
+    }
+    g.restore();
+    for (const p of round.pillars) {
+      g.fillStyle = t.pillar;
+      g.strokeStyle = t.pillarEdge;
+      g.lineWidth = 1.5 * this.dpr;
+      g.beginPath();
+      if (p.kind === 'square') g.rect((p.x - p.r) * k, (p.y - p.r) * k, 2 * p.r * k, 2 * p.r * k);
+      else g.arc(p.x * k, p.y * k, p.r * k, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
+    this.floorOf = runner;
   }
 
   /** Piece i of a trail: square ends (the reference's), a round join to the piece before it. */
@@ -125,9 +206,24 @@ export class Renderer {
     const g = this.top;
     const T = Math.max(0, o.T);
     const frac = Math.min(1, Math.max(0, T - s.k));
+    if (this.floorOf !== runner) this.drawFloor(runner);
     this.settle(runner, s.k - SETTLE, o.colourOf);
     g.clearRect(0, 0, g.canvas.width, g.canvas.height);
-    const rect = wallsAt(s.walls, T);
+    const scale = round.scaleAt(T);
+    const rect = round.floor.rect(scale);
+    const floor = round.floor;
+    let open = false;
+    for (const c of s.curves) if (c.alive && c.effects.some((e: any) => e.kind === 'openWalls' || e.kind === 'greenOpenWalls')) open = true;
+
+    // the edge of a shaped floor (the square's is the field's own line), dashed while walls are open
+    if (floor.shape !== 'square' && scale === 1) {
+      g.strokeStyle = open ? this.theme.open : this.theme.edge;
+      g.lineWidth = 1.5 * this.dpr;
+      g.setLineDash(open ? [6 * this.dpr, 5 * this.dpr] : []);
+      shapePath(g, floor, k);
+      g.stroke();
+      g.setLineDash([]);
+    }
 
     // the newest pieces, not on the trail yet
     const t = s.trail;
@@ -143,7 +239,7 @@ export class Renderer {
     for (const c of s.curves) {
       const h = round.headAt(c, frac, acts);
       const m = round.motion(c);
-      if (m.wrap) wrapInto(h, rect);
+      if (m.wrap && floor.shape === 'square') wrapInto(h, rect);
       heads.push({ c, x: h.x, y: h.y, a: h.a, own: runner.own.has(c.p) });
       // the live line end, from the last point to the head
       const drawing = c.alive && (s.phase === 'draw' || s.phase === 'linger') && c.gapLeft <= 0 && !m.fly && Math.abs(h.x - c.x) + Math.abs(h.y - c.y) < 40;
@@ -256,13 +352,13 @@ export class Renderer {
     if (s.walls.closing) {
       g.fillStyle = this.theme.veil;
       const W = round.W * k, H = round.H * k;
-      g.beginPath();
+      shapePath(g, floor, k, scale);
       g.rect(0, 0, W, H);
-      g.rect(rect.x0 * k, rect.y0 * k, (rect.x1 - rect.x0) * k, (rect.y1 - rect.y0) * k);
       g.fill('evenodd');
-      g.strokeStyle = this.theme.edge;
+      g.strokeStyle = open ? this.theme.open : this.theme.edge;
       g.lineWidth = 1.5 * this.dpr;
-      g.strokeRect(rect.x0 * k, rect.y0 * k, (rect.x1 - rect.x0) * k, (rect.y1 - rect.y0) * k);
+      shapePath(g, floor, k, scale);
+      g.stroke();
     }
 
     // darkness: black but for a light around each head
