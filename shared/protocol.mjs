@@ -32,8 +32,8 @@ export const DOWN = Object.freeze({
   COUNTDOWN_STOP: 23,
   ROUND_START: 24, // { start, at }: the round's start (engine.mjs) and the server time of frame 0
   ACTION_ADD: 25, // another player's action (the action's array)
-  ACTION_REMOVE: 26, // [round, player, actionNum]: take back an action relayed before
-  ACTION_REJECT: 27, // [round, player, actionNum]: your action came too late (or was wrong)
+  ACTION_REMOVE: 26, // [round, player, actionNum]: take back an action (yours, when it was moved)
+  ACTION_REJECT: 27, // [round, player, actionNum]: your action was wrong (malformed, another round)
   ERROR: 29, // { code }
   KICKED: 30,
 });
@@ -48,7 +48,8 @@ export const fromAction = (a) => [a.round, a.frame, a.player, a.num, a.sub, a.di
 /**
  * The clock's timings, in milliseconds (data, like the feel: change them here).
  *  authority   the server simulates this far behind the shared clock, so actions reach it before
- *              it simulates their frame; one that arrives later is rejected and taken back
+ *              it simulates their frame; one that arrives later moves to the earliest frame still
+ *              open (the sender's page swaps it), unless it's later than retimeLimit
  *  lead        a round's frame 0 is this far after the server sends its start, so every page has
  *              the start in hand before the round begins
  *  between     from a round's end to the next one's start (the countdown)
@@ -56,6 +57,7 @@ export const fromAction = (a) => [a.round, a.frame, a.player, a.num, a.sub, a.di
  *  inputShift  your actions are stamped this far ahead (+) or behind (−) of the moment you press:
  *              ahead means fewer rewinds on the other pages and a slightly later turn on yours
  *  ahead       an action stamped further than this many frames ahead of the server is refused
+ *  retimeLimit an action later than this (ms) is refused rather than moved
  *  ping        how often a page measures the clock
  *  rewind      snapshots kept for rewinding, in frames; an older action replays the round from 0
  */
@@ -66,6 +68,7 @@ export const NET = Object.freeze({
   watch: 200,
   inputShift: 0,
   ahead: 30,
+  retimeLimit: 2000,
   ping: 2000,
   rewind: 240,
 });

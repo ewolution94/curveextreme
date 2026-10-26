@@ -14,7 +14,9 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
   give the same state to the last bit in every JavaScript engine: the seed makes the randomness, and
   the maths is its own (`shared/dmath.mjs`: sine and cosine from +, −, ×, ÷ alone, since `Math.sin`
   may differ between Chrome and Safari in the last bit). A steering change applies at the moment
-  within the frame it happened, along exact arcs.
+  within the frame it happened (the key's or finger's own event time), along exact arcs. A head
+  collides with the lines as they're drawn: bands with square ends, every curve moved before any
+  head is checked, so a gap is as wide as it looks and two heads meeting in one frame both crash.
 - **Everything that makes the feel is data**, so a playtest changes the game without code:
   - `shared/feel.mjs`: the feel profile (speed, turn radius, line width, hit size, gaps, the phases
     before a round, tick rate, field size…). Classic is the reference as measured; GS++ its fast mode.
@@ -40,8 +42,9 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
   frame is already past, the page rewinds to the snapshot before it and simulates forward again
   (`shared/timeline.mjs`), which ends exactly where it would have.
 - **The server is the referee** (`server/rooms.mjs`): it runs the same round `NET.authority` ms behind
-  the clock, takes an action whose frame it hasn't simulated yet and relays it, rejects a later one
-  (the page takes it back and sends what you're holding again), and owns who's in, colours and teams,
+  the clock, takes an action whose frame it hasn't simulated yet and relays it, moves a later one to
+  the earliest frame still open (the sender's page swaps its copy; the log says how late they came),
+  and owns who's in, colours and teams,
   who's out (its word decides), the points and the rounds. Late joiners get the round's start and
   every action so far and simulate up to now. The host can take someone out of the room (kick).
   The timings (`NET`) are data like the feel.

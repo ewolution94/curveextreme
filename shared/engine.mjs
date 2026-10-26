@@ -98,11 +98,38 @@ export function wallScale(walls, k) {
 
 const CELL = 12;
 const cellKey = (gx, gy) => gx * 8192 + gy;
-const TRAIL_FIELDS = ['x', 'y', 'px', 'py', 'r', 's', 'cid', 'p', 'f', 'key'];
+const TRAIL_FIELDS = ['x', 'y', 'px', 'py', 'r', 's', 'l', 'cid', 'p', 'f', 'key'];
 
 /**
- * The lines so far: one point per drawn frame (from px, py to x, y, half-width r), with the curve,
- * the player, the frame and the grid cell it's filed in. Points only ever get added at the end, so
+ * Does a head (centre hx, hy, hit radius hr) touch a drawn piece of line from (ax, ay) to (bx, by),
+ * half its width pr? The piece is what the page draws: a band with square ends, so a gap is exactly
+ * as wide for the engine as it looks (the head's hit size is the only allowance). Plain arithmetic,
+ * no square root: the same bits in every engine.
+ */
+export function touchesPiece(hx, hy, hr, ax, ay, bx, by, pr) {
+  const sx = bx - ax, sy = by - ay;
+  const L2 = sx * sx + sy * sy;
+  if (L2 === 0) return false;
+  const vx = hx - ax, vy = hy - ay;
+  const along = vx * sx + vy * sy; // how far along the piece, × its length
+  const across = vx * sy - vy * sx; // how far beside its middle, × its length
+  let du2 = 0; // past an end, squared
+  if (along < 0) du2 = (along * along) / L2;
+  else if (along > L2) du2 = ((along - L2) * (along - L2)) / L2;
+  const hr2 = hr * hr;
+  if (du2 >= hr2) return false;
+  const v2 = (across * across) / L2;
+  const pr2 = pr * pr;
+  if (v2 <= pr2) return true;
+  // beside the band: (|v| − pr)² + du² < hr², squared once more instead of a root
+  const q = hr2 - du2;
+  const a = v2 + pr2 - q;
+  return a < 0 || a * a < 4 * pr2 * v2;
+}
+
+/**
+ * The lines so far: one point per drawn frame (the piece from px, py to x, y, half-width r, length
+ * l), with the curve, the player, the frame and the grid cell it's filed in. Points only ever get added at the end, so
  * rewinding cuts the arrays back; an eraser starts a new trail object and leaves the old one as it
  * was for the snapshots that still point at it.
  */
@@ -325,10 +352,18 @@ export class Round {
 
     const aliveBefore = this.aliveSet();
     if (s.phase !== 'still') {
+      // every curve moves and draws its new piece first, then every head is checked against the
+      // lines as they are now: two heads reaching one spot in one frame both meet the other's newest
+      // piece, whoever comes first in the list of players
+      const moved = [];
       for (const c of s.curves) {
         if (!c.alive) continue;
-        this.frameOf(c, mine[c.p] ?? [], scale, k, ev);
+        const mv = this.move(c, mine[c.p] ?? [], scale, k, ev);
+        if (mv) moved.push(mv);
       }
+      for (const mv of moved) if (mv.draw) this.addPoint(mv.c, mv.m, mv.px, mv.py, k, mv.len);
+      for (const mv of moved) this.collide(mv, scale, k, ev);
+      for (const mv of moved) if (mv.c.alive) this.pickups(mv.c, mv.m, k, ev);
     }
     for (let p = 0; p < this.n; p++) {
       const list = mine[p];
@@ -390,8 +425,11 @@ export class Round {
     return ev;
   }
 
-  /** One curve through one frame: steer (piece by piece between the actions), wrap, gap, collide. */
-  frameOf(c, acts, scale, k, ev) {
+  /**
+   * One curve through one frame: steer (piece by piece between the actions), wrap, gap. Returns what
+   * the frame did for the lines and collisions to use, or null while there are none (the free phase).
+   */
+  move(c, acts, scale, k, ev) {
     const s = this.s;
     const feel = this.feel;
     const m = this.motion(c);
@@ -419,7 +457,7 @@ export class Round {
         c.alive = false;
         ev.push({ e: 'die', cid: c.id, p: c.p, x: c.x, y: c.y, by: null });
       }
-      return;
+      return null;
     }
     s.dist[c.p] += len;
     if (m.wrap && this.wrap(c, px, py, scale)) jump = true;
@@ -437,27 +475,27 @@ export class Round {
     }
     const safe = s.zones.some((z) => dist2(c.x, c.y, z.x, z.y) < z.r * z.r);
     if (m.fly || safe) draw = false;
+    return { c, m, px, py, len, draw: draw && !jump, safe };
+  }
 
+  /** A head against the walls, the pillars and every line as drawn (its own neck aside). */
+  collide(mv, scale, k, ev) {
+    const { c, m, len, safe } = mv;
+    if (safe) return;
     const hr = m.hit / 2;
     let dead = false, by = null;
-    if (!safe) {
-      if (!m.wrap && !this.floor.inside(c.x, c.y, hr, scale)) dead = true;
-      else if (this.pillars.length && hitsPillar(this.pillars, c.x, c.y, hr)) dead = true;
-      else if (!m.fly) {
-        const hit = this.hitLine(c, hr, len, k);
-        if (hit >= 0) {
-          dead = true;
-          by = s.trail.p[hit];
-        }
+    if (!m.wrap && !this.floor.inside(c.x, c.y, hr, scale)) dead = true;
+    else if (this.pillars.length && hitsPillar(this.pillars, c.x, c.y, hr)) dead = true;
+    else if (!m.fly) {
+      const hit = this.hitLine(c, hr, len, k);
+      if (hit >= 0) {
+        dead = true;
+        by = this.s.trail.p[hit];
       }
     }
-    if (dead) {
-      c.alive = false;
-      ev.push({ e: 'die', cid: c.id, p: c.p, x: c.x, y: c.y, by: by !== null && by !== c.p ? by : null });
-      return;
-    }
-    if (draw && !jump) this.addPoint(c, m, px, py, k);
-    this.pickups(c, m, k, ev);
+    if (!dead) return;
+    c.alive = false;
+    ev.push({ e: 'die', cid: c.id, p: c.p, x: c.x, y: c.y, by: by !== null && by !== c.p ? by : null });
   }
 
   /** Is the round decided? FFA: one player (or none) left; teams: one team left. */
@@ -481,21 +519,21 @@ export class Round {
     ev.push({ e: 'phase', p: 'linger', winner });
   }
 
-  addPoint(c, m, px, py, k) {
+  addPoint(c, m, px, py, k, len) {
     const t = this.s.trail;
     const i = t.x.length;
     const key = cellKey(Math.floor(c.x / CELL), Math.floor(c.y / CELL));
-    t.x.push(c.x); t.y.push(c.y); t.px.push(px); t.py.push(py); t.r.push(m.w / 2); t.s.push(c.s);
+    t.x.push(c.x); t.y.push(c.y); t.px.push(px); t.py.push(py); t.r.push(m.w / 2); t.s.push(c.s); t.l.push(len);
     t.cid.push(c.id); t.p.push(c.p); t.f.push(k); t.key.push(key);
     let bucket = t.grid.get(key);
     if (!bucket) t.grid.set(key, (bucket = []));
     bucket.push(i);
   }
 
-  /** The index of the line point the head hits, or −1. */
+  /** The index of the piece of line the head touches, or −1. */
   hitLine(c, hr, len, k) {
     const t = this.s.trail;
-    const reach = hr + 12;
+    const reach = hr + 24; // a piece is filed by its end; its start lies up to a piece's length back
     const x0 = Math.floor((c.x - reach) / CELL), x1 = Math.floor((c.x + reach) / CELL);
     const y0 = Math.floor((c.y - reach) / CELL), y1 = Math.floor((c.y + reach) / CELL);
     for (let gx = x0; gx <= x1; gx++) {
@@ -504,10 +542,10 @@ export class Round {
         if (!bucket) continue;
         for (const i of bucket) {
           const pr = t.r[i];
-          if (t.cid[i] === c.id && c.s - t.s[i] < (hr + pr) * 1.5 + len) continue; // our own neck
+          // our own neck: the pieces drawn just now, measured from where each one starts
+          if (t.cid[i] === c.id && c.s - (t.s[i] - t.l[i]) < (hr + pr) * 1.5 + len) continue;
           if (t.p[i] === c.p && k < c.immuneUntil) continue; // just split
-          const rr = hr + pr;
-          if (dist2(t.x[i], t.y[i], c.x, c.y) < rr * rr) return i;
+          if (touchesPiece(c.x, c.y, hr, t.px[i], t.py[i], t.x[i], t.y[i], pr)) return i;
         }
       }
     }

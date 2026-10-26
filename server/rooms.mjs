@@ -405,8 +405,15 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       this.countdown();
     }
 
+    /** For the playtests' logs: how often a turn came too late for its own frame, and by how much. */
+    lateReport() {
+      const g = this.game;
+      if (g?.retimed) console.log(`room ${this.code} round ${g.match.roundNo}: ${g.actions} turns, ${g.retimed} too late for their frame (the latest by ${g.lateMs} ms)`);
+    }
+
     stop(conn) {
       if (conn.id !== this.host || this.phase === 'lobby') return;
+      if (this.game?.tl) this.lateReport();
       const counting = !!this.game?.countdown;
       this.halt();
       this.game = null;
@@ -446,6 +453,9 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       g.announced = new Set();
       g.nums = g.order.map(() => 0);
       g.stamps = g.order.map(() => [-1, 0]);
+      g.actions = 0;
+      g.retimed = 0;
+      g.lateMs = 0;
       this.broadcast(DOWN.ROUND_START, { start, at: g.at });
       this.schedule();
     }
@@ -487,6 +497,7 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
 
     endRound() {
       const g = this.game;
+      this.lateReport();
       g.match.applyRound(g.tl.round.result());
       this.broadcast(DOWN.UPDATE, { points: g.match.points, teamWins: g.match.teamWins });
       if (g.match.over) return this.finish();
@@ -509,7 +520,13 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       this.broadcast(DOWN.UPDATE, { view: this.view() });
     }
 
-    /** A steering action: taken and relayed to the others, or rejected. */
+    /**
+     * A steering action: taken and relayed to the others. One that arrives after the server has
+     * simulated its frame (a slow connection) isn't thrown away: it moves to the earliest moment the
+     * server can still apply, the sender's page swaps its own copy for that one, and everyone gets
+     * the moved one. The turn lands a little late, by only as much as it was late, and a Corner press
+     * is never lost. Malformed, wrong-round or far-future actions are rejected.
+     */
     action(conn, payload) {
       const g = this.game;
       if (!g || !Array.isArray(payload)) return;
@@ -523,18 +540,30 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
       if (!g.tl || a.round !== g.match.roundNo || g.tl.round.phase === 'done') return reject();
       if (!int(a.frame) || !int(a.sub) || a.sub < 0 || a.sub >= SUBS) return reject();
       if (![-1, 0, 1].includes(a.dir) || ![-1, 0, 1, undefined, null].includes(a.press)) return reject();
+      if (a.frame > this.clockFrame() + NET.ahead) return reject();
+      // the earliest moment still open: the server's next frame, and never before this player's last
       const [lf, ls] = g.stamps[p];
-      const late = a.frame < g.tl.k;
-      const early = a.frame > this.clockFrame() + NET.ahead;
-      const backwards = a.frame < lf || (a.frame === lf && a.sub < ls);
-      if (late || early || backwards) return reject();
-      g.nums[p] = a.num;
-      g.stamps[p] = [a.frame, a.sub];
+      let [frame, sub] = [g.tl.k, 0];
+      if (lf > frame || (lf === frame && ls > sub)) [frame, sub] = [lf, ls];
+      const late = a.frame < frame || (a.frame === frame && a.sub < sub);
+      if (late && (frame - a.frame) * this.frameMs() > NET.retimeLimit) return reject();
       const action = { ...a, press: a.press || 0 };
+      if (late) {
+        g.retimed++;
+        g.lateMs = Math.max(g.lateMs, Math.round((frame - a.frame + (sub - a.sub) / SUBS) * this.frameMs()));
+        action.frame = frame;
+        action.sub = sub;
+      }
+      g.nums[p] = a.num;
+      g.stamps[p] = [action.frame, action.sub];
+      g.actions++;
       g.tl.add(action);
       const wire = fromAction(action);
       g.log.push(wire);
-      this.broadcast(DOWN.ACTION_ADD, wire, conn);
+      if (late) {
+        conn.send(DOWN.ACTION_REMOVE, [a.round, p, a.num]);
+        this.broadcast(DOWN.ACTION_ADD, wire);
+      } else this.broadcast(DOWN.ACTION_ADD, wire, conn);
     }
 
     /** A player gone mid-round: their curve goes straight from the server's next frame. */

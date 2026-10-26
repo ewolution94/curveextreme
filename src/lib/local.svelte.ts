@@ -40,11 +40,11 @@ export class LocalGame {
     });
     this.steerings = seats.map(
       (_, i) =>
-        new Steering((dir, press) => {
+        new Steering((dir, press, time) => {
           const r = this.runner;
           if (!r || r.round.phase === 'done') return;
           if (!press && r.lastDir(i) === dir) return;
-          r.local(i, dir, press, ++this.nums[i]);
+          r.local(i, dir, press, ++this.nums[i], time);
         }),
     );
   }

@@ -133,19 +133,26 @@ test('rooms: reservations, the binary socket, a round on the shared clock, actio
     a.send(UP.ACTION, action);
     assert.deepEqual(await b.next(DOWN.ACTION_ADD), action);
 
-    // one from long ago is rejected
+    // one from before the server's frame (a slow connection) moves to the earliest frame still open:
+    // the sender takes its copy back and gets the moved one, the others get the moved one
     await new Promise((r) => setTimeout(r, 700));
-    a.send(UP.ACTION, [start.no, 0, me, 2, 0, 0, 0]);
-    assert.deepEqual(await a.next(DOWN.ACTION_REJECT), [start.no, me, 2]);
-    // and one for another player is ignored
-    a.send(UP.ACTION, [start.no, frame + 40, 1 - me, 3, 0, -1, 0]);
+    a.send(UP.ACTION, [start.no, frame, me, 2, 900, 0, 0]);
+    assert.deepEqual(await a.next(DOWN.ACTION_REMOVE), [start.no, me, 2]);
+    const moved = await a.next(DOWN.ACTION_ADD, (x) => x[3] === 2);
+    assert.ok(moved[1] > frame || (moved[1] === frame && moved[4] > 900), `moved to frame ${moved[1]}`);
+    assert.deepEqual([moved[0], moved[2], moved[3], moved[5]], [start.no, me, 2, 0], 'the same action, later');
+    assert.deepEqual(await b.next(DOWN.ACTION_ADD, (x) => x[3] === 2), moved);
+    // a wrong round is rejected; one for another player is ignored
+    a.send(UP.ACTION, [start.no + 5, frame + 40, me, 3, 0, 1, 0]);
+    assert.deepEqual(await a.next(DOWN.ACTION_REJECT), [start.no + 5, me, 3]);
+    a.send(UP.ACTION, [start.no, frame + 40, 1 - me, 4, 0, -1, 0]);
 
     // a late joiner watches, and gets the round so far
     const rc = await reserve(code, who('cara'));
     const c = client(rc.body.session, 'cara');
     const initC = await c.next(DOWN.INIT);
     assert.equal(initC.round.start.seed, start.seed);
-    assert.deepEqual(initC.round.actions, [action]);
+    assert.deepEqual(initC.round.actions, [action, moved]);
     assert.equal(initC.view.members.find((m) => m.id === 'id-cara-0000').playing, false);
 
     // the host kicks the watcher: gone, and can't come back

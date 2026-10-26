@@ -141,3 +141,12 @@ test('a powerup lands only where it’s free: none on a floor full of pillars, e
   assert.ok(r.s.powerups.length > 0);
   for (const p of r.s.powerups) assert.ok(!hitsPillar(r.pillars, p.x, p.y, CLASSIC.powerupRadius), 'in the clearing');
 });
+
+test('a square pillar hits by the distance to the square, also at its corners', () => {
+  const sq = [{ kind: 'square', x: 0, y: 0, r: 10 }];
+  const hr = CLASSIC.hit / 2;
+  assert.equal(hitsPillar(sq, 10 + hr - 0.01, 0, hr), true, 'beside it');
+  assert.equal(hitsPillar(sq, 10 + hr + 0.01, 0, hr), false);
+  assert.equal(hitsPillar(sq, 11.7, 11.7, hr), true, '2.4 from the corner');
+  assert.equal(hitsPillar(sq, 11.9, 11.9, hr), false, '2.69 from the corner');
+});

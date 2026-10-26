@@ -164,8 +164,12 @@ const near = (p, x, y, d) => (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y) < d *
 /** Does a head of radius hr at (x, y) touch a pillar? */
 export function hitsPillar(pillars, x, y, hr) {
   for (const p of pillars) {
-    const dx = Math.abs(x - p.x), dy = Math.abs(y - p.y), reach = p.r + hr;
-    if (p.kind === 'square' ? dx < reach && dy < reach : dx * dx + dy * dy < reach * reach) return true;
+    const dx = Math.abs(x - p.x), dy = Math.abs(y - p.y);
+    if (p.kind === 'square') {
+      // the distance to the square itself: at a corner, to the corner
+      const ox = Math.max(0, dx - p.r), oy = Math.max(0, dy - p.r);
+      if (ox * ox + oy * oy < hr * hr) return true;
+    } else if (dx * dx + dy * dy < (p.r + hr) * (p.r + hr)) return true;
   }
   return false;
 }

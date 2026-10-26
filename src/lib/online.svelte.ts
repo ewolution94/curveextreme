@@ -55,18 +55,18 @@ function mine() {
 }
 
 /** Your steering into the round, and to the server, when it changes. */
-export const steering = new Steering((dir, press) => {
+export const steering = new Steering((dir, press, time) => {
   if (press === -1) stats.turnsLeft! += 1;
   if (press === 1) stats.turnsRight! += 1;
-  steer(dir, press);
+  steer(dir, press, time);
 });
 
-function steer(dir: number, press: number) {
+function steer(dir: number, press: number, time = performance.now()) {
   const r = game.runner;
   const p = mine();
   if (!r || p < 0 || r.round.phase === 'done') return;
   if (!press && r.lastDir(p) === dir) return;
-  const a = r.local(p, dir, press, ++num);
+  const a = r.local(p, dir, press, ++num, time);
   net.send(UP.ACTION, fromAction({ ...a, round: r.no }));
 }
 

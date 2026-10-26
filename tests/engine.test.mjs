@@ -1,7 +1,7 @@
 // The engine against the reference's measured numbers and the rules. Fast, fixed seeds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Match, Round, arc, motionOf, targetFor } from '../shared/engine.mjs';
+import { Match, Round, arc, motionOf, targetFor, touchesPiece } from '../shared/engine.mjs';
 import { CLASSIC, GSPP, fieldFor, cleanFeel } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { sin, cos } from '../shared/dmath.mjs';
@@ -244,4 +244,33 @@ test('walls while moving without a line: off, wrap or solid', () => {
   const off = run('off');
   assert.equal(off.died, false);
   assert.ok(off.x < 0, 'free to leave');
+});
+
+test('the hitbox is the line as drawn: a gap is as wide as it looks, the side gives the same small allowance', () => {
+  const hr = CLASSIC.hit / 2, pr = CLASSIC.width / 2;
+  // a piece of line from x = 0 to 1.8 along y = 0 (square ends, as drawn)
+  const touches = (x, y) => touchesPiece(x, y, hr, 0, 0, 1.8, 0, pr);
+  // past its end: the head's dot is clear at pr from the end, the engine allows hr inside that
+  assert.equal(touches(1.8 + hr + 0.01, 0), false, 'past the square end, beyond the hit size: clear');
+  assert.equal(touches(1.8 + hr - 0.01, 0), true);
+  // beside it: hit at hr + pr from the middle line
+  assert.equal(touches(0.9, hr + pr + 0.01), false);
+  assert.equal(touches(0.9, hr + pr - 0.01), true);
+  // at a corner of the band: the distance to the corner itself
+  assert.equal(touches(1.8 + 1.5, pr + 1.5), true, '2.12 from the corner');
+  assert.equal(touches(1.8 + 1.8, pr + 1.8), false, '2.55 from the corner');
+});
+
+test('two heads reaching one spot in one frame both crash, whichever player comes first', () => {
+  for (const swap of [false, true]) {
+    const { r } = setup(2, { feel: { ...NOW, fieldBase: 900 }, seed: 5 });
+    toDraw(r);
+    const [c0, c1] = r.s.curves;
+    const A = swap ? c1 : c0, B = swap ? c0 : c1; // A east along y = 400, B north across x = 421.8
+    Object.assign(A, { x: 400, y: 400, a: 0 });
+    Object.assign(B, { x: 421.8, y: 421.8, a: -Math.PI / 2 });
+    const died = new Set();
+    for (let i = 0; i < 20 && !died.size; i++) for (const e of r.step()) if (e.e === 'die') died.add(e.cid);
+    assert.deepEqual([...died].sort(), [A.id, B.id].sort(), swap ? 'B first' : 'A first');
+  }
 });
