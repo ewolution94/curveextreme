@@ -48,8 +48,7 @@ The plan, the decisions and the measurements: `development/plans/curveextreme.md
   who's out (its word decides), the points and the rounds. Late joiners get the round's start and
   every action so far and simulate up to now. The host can take someone out of the room (kick).
   The timings (`NET`) are data like the feel.
-- **The field's size** is a device setting (Settings): the reference's scale (window height ÷ 922 px
-  per unit) or the whole screen.
+- **The field** always takes the whole space the screen leaves it (no setting).
 - **On the device only**: XP (your points plus 10 for a win), levels (they unlock colours), stats.
 
 ## Run it

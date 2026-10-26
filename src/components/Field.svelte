@@ -1,18 +1,15 @@
 <script lang="ts">
-  // The field: four canvases (floor, trail, top, fog) at the size the settings ask for. Every
-  // animation frame simulates the round up to the clock (runner.ts) and draws it. The square arena is
-  // the field itself (a black box in a thin line); the other shapes are drawn on the floor canvas. "Like the original" draws one
-  // unit as window height ÷ 922 px, whatever the field (a duel is a smallish square, as in the
-  // reference's replays); "fill" uses all the room there is.
+  // The field: four canvases (floor, trail, top, fog), as big as the room allows (the user,
+  // 2026-10-27: always the whole available space, no setting). Every animation frame simulates the
+  // round up to the clock (runner.ts) and draws it. The square arena is the field itself (a black box
+  // in a thin line); the other shapes are drawn on the floor canvas.
   import { onMount, type Snippet } from 'svelte';
   import { Renderer } from '../lib/render';
   import type { RoundRunner } from '../lib/runner';
-  import type { FieldSize } from '../lib/prefs.svelte';
 
   type Props = {
     runner: RoundRunner;
     colourOf: (player: number) => string;
-    size: FieldSize;
     /** Size the field from the parent's box minus this many px (the board beside it), and hug it. */
     reserve?: number;
     /** The field's width in CSS px, for a layout around it. */
@@ -20,9 +17,8 @@
     height?: number;
     children?: Snippet;
   };
-  let { runner, colourOf, size, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
+  let { runner, colourOf, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
 
-  const REFERENCE_UNITS = 922;
   let stage: HTMLDivElement;
   let floorCv: HTMLCanvasElement;
   let trailCv: HTMLCanvasElement;
@@ -48,20 +44,17 @@
   onMount(() => {
     const ren = (renderer = new Renderer(floorCv, trailCv, topCv, fogCv));
     let laidW = 0, laidH = 0, laidBox = '';
-    const coarse = matchMedia('(pointer: coarse)');
 
     function layout(force = false) {
       const W = runner.round.W, H = runner.round.H;
       const host = reserve >= 0 ? stage.parentElement! : stage;
       const boxW = host.clientWidth - Math.max(0, reserve), boxH = host.clientHeight;
-      const key = `${boxW}x${boxH}:${size}:${coarse.matches}:${window.innerHeight}:${reserve}`;
+      const key = `${boxW}x${boxH}:${reserve}`;
       if (!force && key === laidBox && laidW === W && laidH === H) return;
       laidBox = key;
       laidW = W;
       laidH = H;
-      let s = Math.min(boxW / W, boxH / H);
-      const reference = size === 'reference' || (size === 'auto' && !coarse.matches);
-      if (reference) s = Math.min(s, window.innerHeight / REFERENCE_UNITS);
+      const s = Math.min(boxW / W, boxH / H);
       cssW = Math.max(1, Math.floor(W * s));
       cssH = Math.max(1, Math.floor(H * s));
       width = cssW;

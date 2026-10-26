@@ -92,7 +92,7 @@
       {/if}
     </Scoreboard>
     </div>
-    <Field {runner} {colourOf} size={prefs.fieldSize}
+    <Field {runner} {colourOf}
       reserve={compact ? PHONE_BOARD + PHONE_SIDE + 2 * PHONE_GAP : BOARD + GAP} bind:width={fieldW} bind:height={fieldH}>
       {#if banner}
         <div class="banner" class:fade={phase === 'free'}>

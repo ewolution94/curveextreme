@@ -10,7 +10,7 @@
   import GuideRow from './GuideRow.svelte';
   import { themeShift } from '../../vendor/ewo/elements/theme-shift.js';
   import { i18n, setLanguage, systemLang, t, type LangChoice } from '../lib/i18n.svelte';
-  import { prefs, savePrefs, type FieldSize } from '../lib/prefs.svelte';
+  import { prefs, savePrefs } from '../lib/prefs.svelte';
   import { sfx, unlockAudio } from '../lib/sound';
   import { admin, lock, unlock } from '../lib/admin.svelte';
   import { waitAt } from '../lib/waits';
@@ -80,7 +80,7 @@
     else themeShift(() => setLanguage(next));
   }
 
-  function set<K extends 'fieldSize' | 'sound'>(key: K, value: (typeof prefs)[K]) {
+  function set<K extends 'sound'>(key: K, value: (typeof prefs)[K]) {
     prefs[key] = value;
     savePrefs();
   }
@@ -148,17 +148,6 @@
             }
           }}
         ></ewo-switch>
-      </div>
-    </section>
-    <section>
-      <h3 class="label">{t('On this device')}</h3>
-      <div class="row">
-        <span class="name">{t('Field size')}<small>{t('Original keeps the reference’s scale, so the field may not fill the screen.')}</small></span>
-        <ewo-segmented stretch value={prefs.fieldSize} label={t('Field size')} onchange={(e) => set('fieldSize', e.detail.value as FieldSize)}>
-          <option value="fill">{t('Fill')}</option>
-          <option value="reference">{t('Original')}</option>
-          <option value="auto">{t('Auto')}</option>
-        </ewo-segmented>
       </div>
     </section>
     <section class="admin">
