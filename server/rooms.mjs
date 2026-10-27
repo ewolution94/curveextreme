@@ -13,7 +13,7 @@
 // rest: who's in, the teams and colours, who's out (its word decides a disagreement), the scores,
 // the rounds.
 
-import { randomInt } from 'node:crypto';
+import { randomInt as cryptoInt } from 'node:crypto';
 import { Match } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
 import { BUILT_IN, cleanFeel } from '../shared/feel.mjs';
@@ -64,7 +64,11 @@ export function cleanWho(body) {
   };
 }
 
-export function createRooms({ profiles, clock = () => performance.now() }) {
+/**
+ * The rooms. `randomInt(n)` (0 ≤ k < n) draws the room codes and the games' seeds: crypto's, unless a
+ * test passes its own (learnings/randomness.md).
+ */
+export function createRooms({ profiles, clock = () => performance.now(), randomInt = cryptoInt }) {
   /** @type {Map<string, Room>} */
   const rooms = new Map();
   /** session → { room, id, until } */
