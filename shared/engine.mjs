@@ -258,9 +258,14 @@ export class Round {
     return this.s.trail;
   }
 
-  /** A curve's numbers now: its effects, and the patch it's on (ice turns wider, mud is slower). */
+  /**
+   * A curve's numbers now: its effects, the warm-up (moving without a line, the turn is tighter by
+   * feel.freeTurn) and the patch it's on (ice turns wider, mud is slower).
+   */
   motion(c) {
     const m = motionOf(c.effects, this.feel);
+    // by the frame, not the phase, so the head drawn between frames turns as the next step will
+    if (this.s.k >= this.stillK && this.s.k < this.freeK) m.r *= this.feel.freeTurn ?? 1;
     if (this.patches.length) {
       const p = patchAt(this.patches, c.x, c.y);
       if (p?.kind === 'ice') m.r *= ARENA_NUMBERS.ice.radius;

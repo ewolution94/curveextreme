@@ -72,6 +72,8 @@ export type ShowOptions = {
   /** The frame shown, fractional (the runner's clock). */
   T: number;
   colourOf: (player: number) => string;
+  /** What's written beside a player's head while the curves sit still: [its left, its right]. */
+  labelsOf?: (player: number) => [string, string] | null;
 };
 
 type Head = { c: any; x: number; y: number; a: number; own: boolean };
@@ -301,6 +303,30 @@ export class Renderer {
           g.lineTo((hx + Math.cos(a) * 8) * k, (hy + Math.sin(a) * 8) * k);
         }
         g.stroke();
+        // which way is left and which is right for this curve, beside its head as it points (only
+        // the curves steered here); upright text, outlined in the field's black
+        const labels = h.own ? o.labelsOf?.(h.c.p) : null;
+        if (labels) {
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.lineJoin = 'round';
+          g.lineWidth = 4 * this.dpr;
+          g.strokeStyle = this.theme.field;
+          g.fillStyle = colour;
+          // just outside the pulsing ring around your own head (at most w/2 + 12 units)
+          const ring = (m.w / 2 + 12) * k + 6 * this.dpr;
+          labels.forEach((text, i) => {
+            // an arrow key alone is a small glyph: drawn larger, so it reads like the letters
+            const fontPx = Math.round((/^[←→↑↓]$/.test(text) ? 22 : 15) * this.dpr);
+            g.font = `700 ${fontPx}px 'Archivo Variable', system-ui, sans-serif`;
+            const side = i === 0 ? -1 : 1; // the curve's left is its heading turned back a quarter
+            const nx = -side * Math.sin(h.a), ny = side * Math.cos(h.a);
+            const away = ring + (g.measureText(text).width / 2) * Math.abs(nx) + (fontPx / 2) * Math.abs(ny);
+            const lx = h.x * k + nx * away, ly = h.y * k + ny * away;
+            g.strokeText(text, lx, ly);
+            g.fillText(text, lx, ly);
+          });
+        }
         if (h.own) {
           const pulse = 0.5 + 0.5 * Math.sin(o.now / 180);
           g.strokeStyle = this.theme.ring;

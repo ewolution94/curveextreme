@@ -7,7 +7,7 @@ import { Match } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
 import { CLASSIC } from '../shared/feel.mjs';
 
-const GAMES = [[25, 6], [25, 7], [29, 6], [30, 5]]; // [round seed, actions seed]
+const GAMES = [[52, 7], [30, 7], [42, 5], [43, 7]]; // [round seed, actions seed]
 const FRAMES = 1400;
 
 function start(seed) {

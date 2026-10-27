@@ -10,6 +10,8 @@
   type Props = {
     runner: RoundRunner;
     colourOf: (player: number) => string;
+    /** What's written beside a player's head before the round moves: [its left, its right]. */
+    labelsOf?: (player: number) => [string, string] | null;
     /** Size the field from the parent's box minus this many px (the board beside it), and hug it. */
     reserve?: number;
     /** The field's width in CSS px, for a layout around it. */
@@ -17,7 +19,7 @@
     height?: number;
     children?: Snippet;
   };
-  let { runner, colourOf, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
+  let { runner, colourOf, labelsOf, reserve = -1, width = $bindable(0), height = $bindable(0), children }: Props = $props();
 
   let stage: HTMLDivElement;
   let floorCv: HTMLCanvasElement;
@@ -67,7 +69,7 @@
       raf = requestAnimationFrame(frame);
       layout();
       const T = runner.tick(now);
-      ren.frame(runner, { now, T, colourOf });
+      ren.frame(runner, { now, T, colourOf, labelsOf });
       // Open Walls (blue, everyone): the edge turns dashed while it runs
       let wraps = false;
       for (const c of runner.round.s.curves) if (c.alive && c.effects.some((e: any) => e.kind === 'openWalls' || e.kind === 'greenOpenWalls')) wraps = true;
@@ -125,9 +127,13 @@
     background: transparent;
     outline: none;
   }
+  /* the drawing above whatever the arena lays over the field (the round's banner): a head, its arrow
+     and its left and right are never hidden behind the words */
   canvas {
     position: absolute;
     inset: 0;
+    z-index: 1;
     display: block;
+    pointer-events: none;
   }
 </style>

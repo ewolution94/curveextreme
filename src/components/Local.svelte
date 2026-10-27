@@ -117,7 +117,8 @@
 
 {#if game && !game.state.over && runner}
   <Arena {runner} version={game.state.version} players={seats.map((s) => ({ ...s, team: 0 }))} me={null}
-    keys={seats.map((s) => `${s.name} ${keyLabel(s.keys[0])} ${keyLabel(s.keys[1])}`).join(' · ')} banner={localBanner}>
+    keys={seats.map((s) => `${s.name} ${keyLabel(s.keys[0])} ${keyLabel(s.keys[1])}`).join(' · ')} banner={localBanner}
+    labelsOf={(p) => (seats[p] ? [keyLabel(seats[p].keys[0]), keyLabel(seats[p].keys[1])] : null)}>
     {#snippet actions()}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <ewo-settings-button bind:this={settingsButton} onclick={() => (settingsOpen = true)}></ewo-settings-button>

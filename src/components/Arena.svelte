@@ -23,11 +23,13 @@
     code?: string;
     keys?: string; // who steers with which keys, under the board
     banner?: { big: string; small: string } | null;
+    /** What's written beside a player's head before the round moves: [its left, its right]. */
+    labelsOf?: (player: number) => [string, string] | null;
     actions: Snippet;
     children?: Snippet;
     area?: HTMLDivElement;
   };
-  let { runner, version, players, me, code, keys, banner, actions, children, area = $bindable() }: Props = $props();
+  let { runner, version, players, me, code, keys, banner, labelsOf, actions, children, area = $bindable() }: Props = $props();
   const colourOf = (p: number) => players[p]?.colour ?? '#888';
 
   const BOARD = 288, GAP = 32, PHONE_BOARD = 186, PHONE_SIDE = 128, PHONE_GAP = 16;
@@ -92,7 +94,7 @@
       {/if}
     </Scoreboard>
     </div>
-    <Field {runner} {colourOf}
+    <Field {runner} {colourOf} {labelsOf}
       reserve={compact ? PHONE_BOARD + PHONE_SIDE + 2 * PHONE_GAP : BOARD + GAP} bind:width={fieldW} bind:height={fieldH}>
       {#if banner}
         <div class="banner" class:fade={phase === 'free'}>

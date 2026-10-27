@@ -47,6 +47,8 @@
     }
     return null;
   });
+  // beside your own head before the round moves: which way is left and which is right for it
+  const labelsOf = (p: number): [string, string] | null => (players[p]?.id === myId() ? [t('Left').toUpperCase(), t('Right').toUpperCase()] : null);
   const keys = $derived(playing ? `${t('{name} steers with', { name: members.get(myId())?.name ?? '' })} ← → · A D` : `${t('Watching')} · ${t('You join the next game.')}`);
 
   onMount(() =>
@@ -64,7 +66,7 @@
 </script>
 
 {#if runner}
-  <Arena {runner} version={online.version} {players} me={myId()} code={v.code} {keys} {banner} bind:area>
+  <Arena {runner} version={online.version} {players} me={myId()} code={v.code} {keys} {banner} {labelsOf} bind:area>
     {#snippet actions()}
       {#if isHost() && admin.on}
         <button class="btn small ghost" type="button" onclick={() => (tuneOpen = !tuneOpen)}>{t('Tune')}</button>

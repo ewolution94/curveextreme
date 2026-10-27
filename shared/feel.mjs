@@ -19,6 +19,7 @@ export const CLASSIC = Object.freeze({
   gapLength: 16, // a gap's length
   stillTime: 2.5, // seconds the curves sit still, with a heading arrow
   freeTime: 2.5, // seconds they move without a line (no collisions)
+  freeTurn: 0.6, // the turn radius while they do, × (our warm-up: tighter, to aim before the lines; the reference's is 1)
   // the walls while they move without a line: 'off' as measured (the dot left the field and drove
   // back in; still outside when the lines start is a crash), 'wrap' (through to the other side) or
   // 'solid' (a crash, like later). What the reference does with a dot still outside is unknown.
@@ -66,6 +67,7 @@ export const DIALS = Object.freeze([
   { key: 'gapLength', label: 'Gap length', unit: 'u', min: 0, max: 60, step: 0.1 },
   { key: 'stillTime', label: 'Still, with the arrow', unit: 's', min: 0, max: 5, step: 0.1 },
   { key: 'freeTime', label: 'Moving without a line', unit: 's', min: 0, max: 5, step: 0.1 },
+  { key: 'freeTurn', label: 'Turn radius then (× the usual)', unit: '×', min: 0.3, max: 1, step: 0.05 },
   { key: 'lingerTime', label: 'A decided round runs on', unit: 's', min: 0, max: 8, step: 0.05 },
   { key: 'tickRate', label: 'Ticks per second', unit: '/s', min: 20, max: 120, step: 1 },
   { key: 'fieldBase', label: 'Field size (× √players)', unit: 'u', min: 150, max: 450, step: 1 },

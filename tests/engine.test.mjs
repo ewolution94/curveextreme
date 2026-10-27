@@ -274,3 +274,13 @@ test('two heads reaching one spot in one frame both crash, whichever player come
     assert.deepEqual([...died].sort(), [A.id, B.id].sort(), swap ? 'B first' : 'A first');
   }
 });
+
+test('the warm-up turns tighter: moving without a line, a held turn has freeTurn × the radius', () => {
+  const { r } = setup(1, { feel: { ...CLASSIC, fieldBase: 5000 } });
+  for (let i = 0; i < r.stillK; i++) r.step();
+  const c = r.s.curves[0];
+  assert.equal(r.motion(c).r, CLASSIC.radius * CLASSIC.freeTurn, 'moving without a line');
+  while (r.phase !== 'draw') r.step();
+  assert.equal(r.motion(c).r, CLASSIC.radius, 'once the lines start');
+  assert.ok(CLASSIC.freeTurn < 1);
+});
