@@ -49,7 +49,7 @@
       <label class="label" for="choice-{ch.key}">{ch.label}</label>
       <select id="choice-{ch.key}" class="field-input" disabled={!editable} value={feel[ch.key] ?? (CLASSIC as any)[ch.key]}
         onchange={(e) => onPatch({ [ch.key]: (e.target as HTMLSelectElement).value } as any)}>
-        {#each ch.options as o (o)}<option value={o}>{o}{o === (CLASSIC as any)[ch.key] ? ' (measured)' : ''}</option>{/each}
+        {#each ch.options as o (o)}<option value={o}>{o}{o === (CLASSIC as any)[ch.key] ? ' (default)' : ''}</option>{/each}
       </select>
     </div>
   {/each}

@@ -13,7 +13,7 @@
 import { POWERUPS, ACTIONS } from './powerups.mjs';
 import { SUBS } from './protocol.mjs';
 import { sin, cos, norm, dist2, TAU, PI, HALF_PI } from './dmath.mjs';
-import { ARENA_NUMBERS, DEFAULT_ARENA, Floor, arenaField, cleanArena, furnish, hitsPillar, patchAt } from './arenas.mjs';
+import { ARENA_NUMBERS, DEFAULT_ARENA, Floor, arenaField, bounceOffPillars, cleanArena, furnish, hitsPillar, patchAt } from './arenas.mjs';
 
 /** The classic target: 10 points per opponent. */
 export const targetFor = (players) => 10 * Math.max(1, players - 1);
@@ -300,6 +300,12 @@ export class Round {
     return true;
   }
 
+  /** The warm-up's walls and pillars: the head (its drawn edge, `margin` from its middle) bounces off. */
+  bounce(c, px, py, margin, scale) {
+    this.floor.bounce(c, px, py, margin, scale);
+    if (this.pillars.length) bounceOffPillars(this.pillars, c, px, py, margin);
+  }
+
   /** A player is in the round while one of their curves is. */
   playerAlive(p) {
     return this.s.curves.some((c) => c.alive && c.p === p);
@@ -456,7 +462,8 @@ export class Round {
     c.jump = false;
 
     if (s.phase === 'free') {
-      const walls = feel.freeWalls ?? 'off';
+      const walls = feel.freeWalls ?? 'bounce';
+      if (walls === 'bounce') this.bounce(c, px, py, m.w / 2, scale);
       if (walls === 'wrap' && this.wrap(c, px, py, scale)) jump = true;
       if (walls === 'solid' && (!this.floor.inside(c.x, c.y, 0, scale) || hitsPillar(this.pillars, c.x, c.y, 0))) {
         c.alive = false;
@@ -725,6 +732,8 @@ export class Round {
       if (a.press && m.corner) cornerTurn(h, m, a.press);
     }
     if (end > t) arc(h, m, dir, end - t);
+    // in the warm-up drawn off the wall as the step will bounce it, not through it for a frame
+    if (s.k < this.freeK && (this.feel.freeWalls ?? 'bounce') === 'bounce') this.bounce(h, c.x, c.y, m.w / 2, this.scaleAt(s.k));
     return h;
   }
 

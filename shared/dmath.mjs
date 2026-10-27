@@ -69,3 +69,37 @@ export const norm = (a) => a - TAU * Math.floor((a + PI) / TAU);
 
 /** The squared distance: compare it with a squared radius, no square root needed. */
 export const dist2 = (ax, ay, bx, by) => (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
+
+// fdlibm's arctangent: four breakpoints, then an odd polynomial (within one unit in the last place).
+const ATAN_HI = [4.63647609000806093515e-1, 7.85398163397448278999e-1, 9.82793723247329054082e-1, 1.570796326794896558e0];
+const ATAN_LO = [2.26987774529616870924e-17, 3.06161699786838301793e-17, 1.39033110312309984516e-17, 6.12323399538461676577e-17];
+const AT = [
+  3.33333333333329318027e-1, -1.99999999998764832476e-1, 1.42857142725034663711e-1, -1.1111110405462355788e-1,
+  9.09088713343650656196e-2, -7.69187620504482999495e-2, 6.66107313738753120669e-2, -5.83357013379057348645e-2,
+  4.97687799461593236017e-2, -3.6531572744216915527e-2, 1.62858201153657823623e-2,
+];
+
+export function atan(v) {
+  if (v !== v) return v;
+  const neg = v < 0;
+  let x = neg ? -v : v;
+  let id = -1;
+  if (x >= 0.4375) {
+    if (x < 0.6875) { id = 0; x = (2 * x - 1) / (2 + x); }
+    else if (x < 1.1875) { id = 1; x = (x - 1) / (x + 1); }
+    else if (x < 2.4375) { id = 2; x = (x - 1.5) / (1 + 1.5 * x); }
+    else { id = 3; x = -1 / x; }
+  }
+  const z = x * x, w = z * z;
+  const s1 = z * (AT[0] + w * (AT[2] + w * (AT[4] + w * (AT[6] + w * (AT[8] + w * AT[10])))));
+  const s2 = w * (AT[1] + w * (AT[3] + w * (AT[5] + w * (AT[7] + w * AT[9]))));
+  const r = id < 0 ? x - x * (s1 + s2) : ATAN_HI[id] - (x * (s1 + s2) - ATAN_LO[id] - x);
+  return neg ? -r : r;
+}
+
+/** The angle of (x, y), in (−π, π]: like Math.atan2, but the same bits everywhere. */
+export function atan2(y, x) {
+  if (x > 0) return atan(y / x);
+  if (x < 0) return atan(y / x) + (y >= 0 ? PI : -PI);
+  return y > 0 ? HALF_PI : y < 0 ? -HALF_PI : 0;
+}

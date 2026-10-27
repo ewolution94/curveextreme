@@ -112,8 +112,8 @@ test('GS++ and teams', () => {
   }
 });
 
-test('free-phase walls: solid crashes there, wrap never leaves the field', () => {
-  for (const freeWalls of ['solid', 'wrap']) {
+test('free-phase walls: solid crashes there, wrap and bounce never leave the field', () => {
+  for (const freeWalls of ['solid', 'wrap', 'bounce']) {
     for (let seed = 40; seed < 46; seed++) play(seed, 5, { ...CLASSIC, freeWalls }, { target: 8 });
   }
 });

@@ -9,8 +9,7 @@ import { sin, cos } from '../shared/dmath.mjs';
 const players = (n, teams = false) =>
   Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}`, colour: '#fff', team: teams ? i % 2 : 0 }));
 
-// The tests start drawing right after the still phase: the free phase has no walls, and a curve left
-// to drive straight on leaves the field in it (and dies when the lines start, like the reference).
+// The tests start drawing right after the still phase, where the walls kill.
 const NOW = { ...CLASSIC, freeTime: 0 };
 
 function setup(n = 2, opts = {}) {
@@ -229,21 +228,27 @@ test('the Tune panel: a new feel reaches the next round', () => {
   assert.notEqual(next.seed, r.start.seed, 'each round its own seed');
 });
 
-test('walls while moving without a line: off, wrap or solid', () => {
+test('walls while moving without a line: bounce (the default), wrap or solid', () => {
   const run = (freeWalls) => {
     const { r } = setup(1, { feel: { ...CLASSIC, freeTime: 4, freeWalls } });
     const c = r.s.curves[0];
     c.x = 10;
     c.a = Math.PI; // heading out of the left wall
-    let died = false;
-    for (let i = 0; i < 260; i++) died ||= r.step().some((e) => e.e === 'die');
-    return { died, x: r.s.curves[0].x };
+    let died = false, least = Infinity;
+    for (let i = 0; i < 260; i++) {
+      died ||= r.step().some((e) => e.e === 'die');
+      least = Math.min(least, r.s.curves[0].x);
+    }
+    return { died, x: r.s.curves[0].x, a: r.s.curves[0].a, least };
   };
   assert.equal(run('solid').died, true);
   assert.ok(run('wrap').x > 0, 'came back in on the other side');
-  const off = run('off');
-  assert.equal(off.died, false);
-  assert.ok(off.x < 0, 'free to leave');
+  assert.equal(CLASSIC.freeWalls, 'bounce');
+  const bounce = run('bounce');
+  assert.equal(bounce.died, false);
+  assert.ok(bounce.least >= CLASSIC.width / 2 - 1e-9, `never past the wall (${bounce.least})`);
+  assert.ok(Math.abs(bounce.a) < 1e-9, 'straight back the way it came');
+  assert.equal(cleanFeel({ freeWalls: 'off' }).freeWalls, 'bounce', 'an old profile’s open walls are gone');
 });
 
 test('the hitbox is the line as drawn: a gap is as wide as it looks, the side gives the same small allowance', () => {

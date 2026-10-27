@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Match, Round } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
-import { ARENA_NUMBERS, Floor, SHAPES, arenaField, cleanArena, hitsPillar } from '../shared/arenas.mjs';
+import { ARENA_NUMBERS, Floor, SHAPES, arenaField, bounceOffPillars, cleanArena, hitsPillar } from '../shared/arenas.mjs';
 import { CLASSIC, fieldFor } from '../shared/feel.mjs';
 import { MODES } from '../shared/modes.mjs';
 import { cos, sin } from '../shared/dmath.mjs';
@@ -149,4 +149,59 @@ test('a square pillar hits by the distance to the square, also at its corners', 
   assert.equal(hitsPillar(sq, 10 + hr + 0.01, 0, hr), false);
   assert.equal(hitsPillar(sq, 11.7, 11.7, hr), true, '2.4 from the corner');
   assert.equal(hitsPillar(sq, 11.9, 11.9, hr), false, '2.69 from the corner');
+});
+
+test('the warm-up: every wall and pillar bounces, nobody leaves the floor, in every shape', () => {
+  const feel = { ...CLASSIC, freeTime: 30 };
+  for (const shape of SHAPES) {
+    for (const seed of [1, 2, 3]) {
+      const r = round({ ...cleanArena({}), shape, size: 'small', pillars: true, patches: true }, 6, { feel, seed });
+      const margin = feel.width / 2 - 1e-9;
+      let bounced = 0, num = 0;
+      // each player turns now and then, for a long warm-up; the head drawn between frames too
+      while (r.s.k < r.freeK) {
+        const acts = [];
+        if (r.s.k % 37 === 0) for (let p = 0; p < 6; p++) acts.push({ player: p, num: ++num, sub: (r.s.k * 7 + p * 131) % 1000, dir: ((r.s.k + p) % 3) - 1, press: 0 });
+        const before = r.s.curves.map((c) => c.a);
+        r.step(acts);
+        for (const c of r.s.curves) {
+          assert.ok(c.alive, `${shape}: alive at ${r.s.k}`);
+          assert.ok(r.floor.inside(c.x, c.y, margin), `${shape} seed ${seed}: on the floor at ${r.s.k} (${c.x}, ${c.y})`);
+          assert.ok(!hitsPillar(r.pillars, c.x, c.y, margin), `${shape} seed ${seed}: clear of the pillars at ${r.s.k}`);
+          if (r.s.k < r.freeK) {
+            const h = r.headAt(c, 0.5);
+            assert.ok(r.floor.inside(h.x, h.y, margin), `${shape}: drawn on the floor between frames`);
+            assert.ok(!hitsPillar(r.pillars, h.x, h.y, margin), `${shape}: drawn clear of the pillars between frames`);
+          }
+          if (Math.abs(c.a - before[c.id]) > 0.2) bounced++;
+        }
+      }
+      assert.ok(bounced > 10, `${shape} seed ${seed}: bounced ${bounced} times`);
+    }
+  }
+});
+
+test('a bounce mirrors: straight at a wall comes straight back, at a slant leaves at the same slant', () => {
+  for (const shape of SHAPES) {
+    const f = new Floor({ shape }, 400, shape === 'hexagon' ? 346 : 400);
+    // straight down at the bottom wall: every shape has one there, square to the heading
+    let y = f.cy + f.H / 2;
+    while (!f.inside(f.cx, y, 3)) y -= 1;
+    const c = { x: f.cx, y: y + 2, a: Math.PI / 2 };
+    f.bounce(c, f.cx, y, 3);
+    assert.ok(f.inside(c.x, c.y, 3), shape);
+    assert.ok(Math.abs(c.a + Math.PI / 2) < 1e-9, `${shape}: back the way it came (${c.a})`);
+  }
+  // the square's bottom wall at 30°, 1 past where it may come: 1 short of it, out at −30°
+  const f = new Floor({ shape: 'square' }, 400, 400);
+  const c = { x: 100, y: 398, a: Math.PI / 6 };
+  f.bounce(c, 100, 396, 3);
+  assert.ok(Math.abs(c.y - 396) < 1e-9 && Math.abs(c.a + Math.PI / 6) < 1e-12, `${c.y} ${c.a}`);
+  // a round pillar head-on, and a square one's corner
+  const d = { x: 0, y: -14, a: Math.PI / 2 };
+  bounceOffPillars([{ kind: 'round', x: 0, y: 0, r: 10 }], d, 0, -20, 5);
+  assert.ok(Math.abs(d.y + 16) < 1e-9 && Math.abs(d.a + Math.PI / 2) < 1e-9, `${d.y} ${d.a}`);
+  const e = { x: 12, y: 12, a: (-3 * Math.PI) / 4 };
+  bounceOffPillars([{ kind: 'square', x: 0, y: 0, r: 10 }], e, 14, 14, 4);
+  assert.ok(!hitsPillar([{ kind: 'square', x: 0, y: 0, r: 10 }], e.x, e.y, 4 - 1e-9) && Math.abs(e.a - Math.PI / 4) < 1e-9, `${e.x} ${e.y} ${e.a}`);
 });

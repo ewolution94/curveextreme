@@ -20,10 +20,11 @@ export const CLASSIC = Object.freeze({
   stillTime: 2.5, // seconds the curves sit still, with a heading arrow
   freeTime: 2.5, // seconds they move without a line (no collisions)
   freeTurn: 0.6, // the turn radius while they do, × (our warm-up: tighter, to aim before the lines; the reference's is 1)
-  // the walls while they move without a line: 'off' as measured (the dot left the field and drove
-  // back in; still outside when the lines start is a crash), 'wrap' (through to the other side) or
-  // 'solid' (a crash, like later). What the reference does with a dot still outside is unknown.
-  freeWalls: 'off',
+  // the walls and pillars while they move without a line: 'bounce' (ours since 2026-10-27: off them
+  // like a ball, so nobody leaves the floor), 'wrap' (through to the other side) or 'solid' (a
+  // crash, like later). The reference has none (the dot left the field and drove back in): players
+  // drove out and lost the round before it started, so that one is no choice any more.
+  freeWalls: 'bounce',
   lingerTime: 4.65, // seconds a decided round runs on before it clears
   fieldBase: 255, // a "Scaled" square field is fieldBase × √players units a side
   fieldWide: 1, // the field's width and height relative to that square
@@ -53,7 +54,7 @@ export const BUILT_IN = Object.freeze({ classic: CLASSIC, gspp: GSPP });
 
 /** The Tune panel's choices (settings that aren't numbers). */
 export const CHOICES = Object.freeze([
-  { key: 'freeWalls', label: 'Walls while moving without a line', options: ['off', 'wrap', 'solid'] },
+  { key: 'freeWalls', label: 'Walls while moving without a line', options: ['bounce', 'wrap', 'solid'] },
 ]);
 
 /** The Tune panel's dials: one per number, with the range a playtest might want. */
