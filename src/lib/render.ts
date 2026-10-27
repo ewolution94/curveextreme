@@ -9,7 +9,7 @@
 import { POWERUPS, ACTIONS } from '../../shared/powerups.mjs';
 import { wrapInto } from '../../shared/engine.mjs';
 import { ARENA_NUMBERS } from '../../shared/arenas.mjs';
-import { drawPowerup } from './icons';
+import { drawPowerupLive, PING_MS } from './icons';
 import type { RoundRunner } from './runner';
 
 export type Theme = {
@@ -95,6 +95,9 @@ export class Renderer {
   private drawnFrame = -1;
   private lastOf = new Map<number, number>(); // each curve's last point on the trail canvas
   private floorOf: RoundRunner | null = null; // whose arena is on the floor canvas
+  /** The powerups as last seen: when each appeared (page ms), where it was, when it went. */
+  private pus = new Map<number, { kind: string; x: number; y: number; born: number; gone: number | null }>();
+  private pusOf: RoundRunner | null = null;
 
   constructor(floor: HTMLCanvasElement, trail: HTMLCanvasElement, top: HTMLCanvasElement, fog: HTMLCanvasElement) {
     this.floor = floor.getContext('2d')!;
@@ -270,9 +273,26 @@ export class Renderer {
       g.stroke();
     }
 
-    // powerups
+    // powerups: stamped in when one appears, a burst where one was picked up (icons.ts). Those
+    // already there when this round reaches the page (a late join) just stand, their pings apart.
     const pr = round.feel.powerupRadius * k;
-    for (const p of s.powerups) drawPowerup(g, p.kind, p.x * k, p.y * k, pr);
+    if (this.pusOf !== runner) {
+      this.pusOf = runner;
+      this.pus.clear();
+      for (const p of s.powerups) this.pus.set(p.id, { kind: p.kind, x: p.x, y: p.y, born: o.now - 1000 - ((p.id * 677) % PING_MS), gone: null });
+    }
+    const here = new Set<number>();
+    for (const p of s.powerups) {
+      here.add(p.id);
+      let v = this.pus.get(p.id);
+      if (!v || v.gone !== null) this.pus.set(p.id, (v = { kind: p.kind, x: p.x, y: p.y, born: o.now, gone: null }));
+      v.x = p.x;
+      v.y = p.y;
+    }
+    for (const [id, v] of this.pus) {
+      if (v.gone === null && !here.has(id)) v.gone = o.now;
+      if (!drawPowerupLive(g, v.kind, v.x * k, v.y * k, pr, v.born, v.gone, o.now)) this.pus.delete(id);
+    }
 
     // heads
     for (const h of heads) {

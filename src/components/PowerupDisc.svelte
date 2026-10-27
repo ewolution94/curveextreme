@@ -12,7 +12,8 @@
     const g = canvas.getContext('2d');
     if (!g) return;
     g.clearRect(0, 0, canvas.width, canvas.height);
-    drawPowerup(g, kind, canvas.width / 2, canvas.height / 2, canvas.width / 2 - 0.5);
+    // a little inside the edge: the faint reach ring around a diamond or hexagon sits on the radius
+    drawPowerup(g, kind, canvas.width / 2, canvas.height / 2, canvas.width / 2 - Math.max(1.5, canvas.width * 0.03));
   });
 </script>
 
