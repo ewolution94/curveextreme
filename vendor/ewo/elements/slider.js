@@ -12,7 +12,9 @@ var f = t`
     user-select: none;
     -webkit-user-select: none;
   }
-  :host(:focus-visible) { outline: none; }
+  /* !important: a page's own :focus-visible outline (Folio's base.css has one) beats a :host rule,
+     and drew a box round the whole element after any key press. The inner ring stays. */
+  :host(:focus-visible) { outline: none !important; }
   :host([disabled]) { opacity: 0.5; pointer-events: none; }
 
   .rail {

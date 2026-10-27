@@ -238,6 +238,10 @@
      blue-violet and Verso's plum, and the only black card on Aale Spiele. */
   --ewo-project-curveextreme:   light-dark(#8226dc, #b07aff);
   --ewo-project-curveextreme-2: light-dark(#9a5600, #ffa133);
+  /* PokeProxy: the green of a self-healing cutting mat and the yellow of its grid lines; the app
+     itself stays monochrome, the cards bring the colour. */
+  --ewo-project-pokeproxy:   light-dark(#0b7a55, #4fd6a5);
+  --ewo-project-pokeproxy-2: light-dark(#8a6500, #f2cf4a);
 }
 
 [data-ewo-project='clinch']  { --ewo-accent: var(--ewo-project-clinch);  --ewo-accent-2: var(--ewo-project-clinch-2); }
@@ -260,6 +264,7 @@
 [data-ewo-project='skibbo'] { --ewo-accent: var(--ewo-project-skibbo); --ewo-accent-2: var(--ewo-project-skibbo-2); }
 [data-ewo-project='randomiser'] { --ewo-accent: var(--ewo-project-randomiser); --ewo-accent-2: var(--ewo-project-randomiser-2); }
 [data-ewo-project='curveextreme'] { --ewo-accent: var(--ewo-project-curveextreme); --ewo-accent-2: var(--ewo-project-curveextreme-2); }
+[data-ewo-project='pokeproxy'] { --ewo-accent: var(--ewo-project-pokeproxy); --ewo-accent-2: var(--ewo-project-pokeproxy-2); }
 [data-ewo-project='cantina'],
 [data-ewo-project='census'],
 [data-ewo-project='landing'] { --ewo-accent: var(--ewo-fg-2); --ewo-accent-2: var(--ewo-fg); }

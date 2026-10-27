@@ -1,7 +1,9 @@
-import { isAvatar, randomAvatar, type Avatar } from './avatar';
+import type { Avatar } from './avatar';
+import { playerEmblem, shareEmblem, sharedName, shareName } from '../../vendor/ewo/elements/emblem-shared.js';
 
 // localStorage that never throws (a private window, blocked storage): reads fall back, writes are
-// best effort. Everything CurveExtreme keeps lives on the device.
+// best effort. Everything CurveExtreme keeps lives on the device; the name and the avatar also go to
+// Folio's shared cookie, so they follow you to the other ewolution games (development/plans/emblems.md).
 
 export function load<T>(key: string, fallback: T): T {
   try {
@@ -26,7 +28,10 @@ export function save(key: string, value: unknown) {
 
 const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-/** This device's player: an id and a secret for the server, a name, a colour and an avatar. */
+/** The name fields' maxlength: a name from another game may be longer. */
+const NAME_MAX = 20;
+
+/** This device's player: an id and a secret for the server, a name, a colour and an avatar (the name and the avatar as shared by the other games, when they are). */
 export function identity(): { id: string; secret: string; name: string; colour: string; avatar: Avatar } {
   const me = load<{ id: string; secret: string; name: string; colour: string; avatar: Avatar | null }>('cx-me', { id: '', secret: '', name: '', colour: '', avatar: null });
   let changed = false;
@@ -35,8 +40,11 @@ export function identity(): { id: string; secret: string; name: string; colour: 
     me.secret = `s-${hex(16)}`;
     changed = true;
   }
-  if (!isAvatar(me.avatar)) {
-    me.avatar = randomAvatar();
+  const avatar = playerEmblem('token', me.avatar) as Avatar;
+  const name = (sharedName() || me.name).slice(0, NAME_MAX);
+  if (String(avatar) !== String(me.avatar) || name !== me.name) {
+    me.avatar = avatar;
+    me.name = name;
     changed = true;
   }
   if (changed) save('cx-me', me);
@@ -71,4 +79,7 @@ export function forgetRoom(code: string) {
 export function saveIdentity(patch: Partial<{ name: string; colour: string; avatar: Avatar }>) {
   const me = identity();
   save('cx-me', { ...me, ...patch });
+  if (patch.name !== undefined) shareName(patch.name);
+  // Joining sends the avatar it already has; only one picked in the maker is new, and shared.
+  if (patch.avatar && String(patch.avatar) !== String(me.avatar)) shareEmblem('token', patch.avatar);
 }
