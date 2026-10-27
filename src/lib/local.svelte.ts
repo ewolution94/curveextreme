@@ -36,7 +36,7 @@ export class LocalGame {
       feel,
       mode: { rate: mode.rate, powerups: mode.powerups },
       arena: opts.arena,
-      seed: (Math.random() * 2 ** 32) >>> 0,
+      seed: crypto.getRandomValues(new Uint32Array(1))[0],
     });
     this.steerings = seats.map(
       (_, i) =>

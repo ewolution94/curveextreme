@@ -13,6 +13,7 @@
 // rest: who's in, the teams and colours, who's out (its word decides a disagreement), the scores,
 // the rounds.
 
+import { randomInt } from 'node:crypto';
 import { Match } from '../shared/engine.mjs';
 import { Timeline } from '../shared/timeline.mjs';
 import { BUILT_IN, cleanFeel } from '../shared/feel.mjs';
@@ -72,7 +73,8 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
   function newCode() {
     for (;;) {
       let code = '';
-      for (let i = 0; i < 4; i++) code += CODE_LETTERS[Math.floor(Math.random() * CODE_LETTERS.length)];
+      // from crypto, not Math.random: a code nobody can work out from the last ones (learnings/randomness.md)
+      for (let i = 0; i < 4; i++) code += CODE_LETTERS[randomInt(CODE_LETTERS.length)];
       if (!rooms.has(code)) return code;
     }
   }
@@ -383,7 +385,7 @@ export function createRooms({ profiles, clock = () => performance.now() }) {
         feel: this.settings.feel,
         mode: this.modeData(),
         arena: this.settings.arena,
-        seed: (Math.random() * 2 ** 32) >>> 0,
+        seed: randomInt(2 ** 32), // the round's powerups and spawns follow from it, so crypto's
       });
       this.game = {
         match,
