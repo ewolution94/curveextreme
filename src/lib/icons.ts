@@ -132,7 +132,9 @@ export function drawPowerup(g: G, kind: string, x: number, y: number, r: number)
       const size = Math.ceil(r * 2);
       const scratch = scratchCanvas(size);
       const s = scratch.getContext('2d')!;
-      s.clearRect(0, 0, size, size);
+      // all of it: drawImage's smoothing reads a pixel past the square it copies, and a bigger disc
+      // drawn before (the lobby's) left its glyph there, a thin line beside the disc in the game
+      s.clearRect(0, 0, scratch.width, scratch.height);
       s.save();
       s.translate(size / 2, size / 2);
       s.scale(r * 0.62, r * 0.62);
@@ -151,6 +153,6 @@ export function drawPowerup(g: G, kind: string, x: number, y: number, r: number)
 let scratch: HTMLCanvasElement | null = null;
 function scratchCanvas(size: number) {
   if (!scratch) scratch = document.createElement('canvas');
-  if (scratch.width < size) scratch.width = scratch.height = size;
+  if (scratch.width < size || scratch.height < size) scratch.width = scratch.height = Math.max(size, scratch.width);
   return scratch;
 }
