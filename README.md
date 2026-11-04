@@ -68,6 +68,7 @@ npm run build && npm start   # the production server on :8080
 | `HOST` | `0.0.0.0` | |
 | `DATA_DIR` | `./data` (`/data` in the image) | saved feel profiles |
 | `CURVEEXTREME_CENSUS` | (off) | Census's ingest origin, e.g. `http://census:4901`: `/_e` and `/_e.js` are forwarded there |
+| `DASHBOARD_URL` | (off) | Dashboard's apps' port, `http://dashboard:8081` on the NAS: the language and sounds a device that hasn't picked starts from (the family's, or CurveExtreme's own). Off or down: the built-in ones, as before |
 
 ## Layout
 

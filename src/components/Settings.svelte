@@ -9,8 +9,8 @@
 <script lang="ts">
   import GuideRow from './GuideRow.svelte';
   import { themeShift } from '../../vendor/ewo/elements/theme-shift.js';
-  import { i18n, setLanguage, systemLang, t, type LangChoice } from '../lib/i18n.svelte';
-  import { prefs, savePrefs } from '../lib/prefs.svelte';
+  import { i18n, langFor, setLanguage, t, type LangChoice } from '../lib/i18n.svelte';
+  import { prefs, setSoundChoice } from '../lib/prefs.svelte';
   import { sfx, unlockAudio } from '../lib/sound';
   import { admin, lock, unlock } from '../lib/admin.svelte';
   import { waitAt } from '../lib/waits';
@@ -75,14 +75,9 @@
 
   function pickLanguage(next: LangChoice) {
     if (next === i18n.choice) return;
-    const shows = next === 'system' ? systemLang() : next;
+    const shows = langFor(next);
     if (shows === i18n.lang) setLanguage(next);
     else themeShift(() => setLanguage(next));
-  }
-
-  function set<K extends 'sound'>(key: K, value: (typeof prefs)[K]) {
-    prefs[key] = value;
-    savePrefs();
   }
 </script>
 
@@ -130,7 +125,7 @@
       <div class="row">
         <span class="name">{t('Language')}</span>
         <ewo-segmented stretch value={i18n.choice} label={t('Language')} onchange={(e) => pickLanguage(e.detail.value as LangChoice)}>
-          <option value="system">{t('System')}</option>
+          <option value="system">{t('Default')}</option>
           <option value="de">Deutsch</option>
           <option value="en">English</option>
         </ewo-segmented>
@@ -141,7 +136,7 @@
           checked={prefs.sound}
           aria-label={t('Sounds')}
           onchange={(e) => {
-            set('sound', e.detail.checked);
+            setSoundChoice(e.detail.checked);
             if (e.detail.checked) {
               unlockAudio();
               sfx.go();

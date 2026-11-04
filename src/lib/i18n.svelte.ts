@@ -1,8 +1,12 @@
 // English and German. The English text is the key; German comes from the table (anything missing
 // stays English). {name} placeholders are filled from the second argument. The choice is the
-// family's: System, Deutsch or English, saved under `ewo:lang` (public/boot.js reads it before paint).
+// family's: Default, Deutsch or English, saved under `ewo:lang` (public/boot.js reads it before paint).
+// Default is Dashboard's language (#ewo-config), else the browser's (src/lib/defaults.ts).
 
-export type Lang = 'en' | 'de';
+import { readConfig } from '../../vendor/ewo/elements/config-client.js';
+import { languageFor, type Lang } from './defaults';
+
+export type { Lang };
 export type LangChoice = Lang | 'system';
 const KEY = 'ewo:lang';
 
@@ -29,13 +33,16 @@ function storedChoice(): LangChoice {
   return 'system';
 }
 
+/** The language a choice shows: the one picked, or for Default Dashboard's, else the browser's. */
+export const langFor = (choice: LangChoice): Lang => languageFor(choice, readConfig().lang, systemLang());
+
 const choice = storedChoice();
-export const i18n = $state({ choice, lang: (choice === 'system' ? systemLang() : choice) as Lang });
+export const i18n = $state({ choice, lang: langFor(choice) });
 
 /** Stores a choice and shows the page in that language. */
 export function setLanguage(next: LangChoice) {
   i18n.choice = next;
-  i18n.lang = next === 'system' ? systemLang() : next;
+  i18n.lang = langFor(next);
   document.documentElement.lang = i18n.lang;
   try {
     localStorage.setItem(KEY, next);
@@ -185,7 +192,7 @@ const DE: Record<string, string> = {
   'End the game': 'Spiel beenden',
   '{name} can end the game.': '{name} kann das Spiel beenden.',
   'General': 'Allgemein',
-  'System': 'System',
+  'Default': 'Standard',
   'Sounds': 'Töne',
   'Coming up': 'Als Nächstes',
   'Steer': 'Lenken',

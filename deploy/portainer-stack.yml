@@ -23,6 +23,7 @@ services:
       # Visit counts: /_e and /_e.js are forwarded to Census over the `ewolution` network.
       # Remove the line to stop counting; the page doesn't change either way.
       - CURVEEXTREME_CENSUS=http://census:4901
+      - DASHBOARD_URL=http://dashboard:8081
     volumes:
       # The feel profiles saved from a room's Tune panel.
       - curveextreme-data:/data

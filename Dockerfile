@@ -9,14 +9,16 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# The server has zero dependencies, so the runtime image is just Node + the built app. Rooms
-# live in memory and end with the container; the saved feel profiles live in /data.
+# The server has zero dependencies, so the runtime image is just Node + the built app, plus
+# Folio's config helper (Dashboard's defaults). Rooms live in memory and end with the container;
+# the saved feel profiles live in /data.
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 TZ=Europe/Berlin DATA_DIR=/data
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY shared ./shared
+COPY vendor/ewo/elements/config-server.js vendor/ewo/elements/config-core.js ./vendor/ewo/elements/
 COPY package.json ./
 RUN mkdir -p /data && chown node:node /data
 USER node

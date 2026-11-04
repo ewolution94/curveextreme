@@ -1,12 +1,19 @@
-// The page's language before first paint (the family's `ewo:lang`: de, en or system; keep in step with
-// src/lib/i18n.svelte.ts), then the splash screen's switch, copied from
+// The page's language before first paint (the family's `ewo:lang`: de, en or system, which is
+// Default; keep in step with src/lib/i18n.svelte.ts and src/lib/defaults.ts): the one saved on this
+// device, else Dashboard's default (#ewo-config, which the server puts first in <head>), else the
+// browser's. Then the splash screen's switch, copied from
 // development/plans/splash-rollout/boot-splash.js. Dark only, so no theme.
+var ewoConfig = {};
+try {
+  ewoConfig = JSON.parse(document.getElementById('ewo-config').textContent) || {};
+} catch (e) {}
 try {
   var lang = localStorage.getItem('ewo:lang');
   if (lang !== 'en' && lang !== 'de') {
     var old = null;
     try { old = JSON.parse(localStorage.getItem('cx-prefs') || '{}').lang; } catch (e) {}
     if (lang !== 'system' && (old === 'en' || old === 'de')) lang = old;
+    else if (ewoConfig.lang === 'en' || ewoConfig.lang === 'de') lang = ewoConfig.lang;
     else {
       var tags = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
       lang = 'en';
